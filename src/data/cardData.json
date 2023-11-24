@@ -1,0 +1,369 @@
+[
+    {
+        "label": "Ace",
+        "suit": "Spades",
+        "unicode": "🂡",
+        "color": "black",
+        "value": 1
+    },
+    {
+        "label": "Two",
+        "suit": "Spades",
+        "unicode": "🂢",
+        "color": "black",
+        "value": 2
+    },
+    {
+        "label": "Three",
+        "suit": "Spades",
+        "unicode": "🂣",
+        "color": "black",
+        "value": 3
+    },
+    {
+        "label": "Four",
+        "suit": "Spades",
+        "unicode": "🂤",
+        "color": "black",
+        "value": 4
+    },
+    {
+        "label": "Five",
+        "suit": "Spades",
+        "unicode": "🂥",
+        "color": "black",
+        "value": 5
+    },
+    {
+        "label": "Six",
+        "suit": "Spades",
+        "unicode": "🂦",
+        "color": "black",
+        "value": 6
+    },
+    {
+        "label": "Seven",
+        "suit": "Spades",
+        "unicode": "🂧",
+        "color": "black",
+        "value": 7
+    },
+    {
+        "label": "Eight",
+        "suit": "Spades",
+        "unicode": "🂨",
+        "color": "black",
+        "value": 8
+    },
+    {
+        "label": "Nine",
+        "suit": "Spades",
+        "unicode": "🂩",
+        "color": "black",
+        "value": 9
+    },
+    {
+        "label": "Ten",
+        "suit": "Spades",
+        "unicode": "🂪",
+        "color": "black",
+        "value": 10
+    },
+    {
+        "label": "Jack",
+        "suit": "Spades",
+        "unicode": "🂫",
+        "color": "black",
+        "value": 11
+    },
+    {
+        "label": "Queen",
+        "suit": "Spades",
+        "unicode": "🂭",
+        "color": "black",
+        "value": 12
+    },
+    {
+        "label": "King",
+        "suit": "Spades",
+        "unicode": "🂮",
+        "color": "black",
+        "value": 13
+    },
+
+    {
+        "label": "Ace",
+        "suit": "Clubs",
+        "unicode": "🃑",
+        "color": "black",
+        "value": 1
+    },
+    {
+        "label": "Two",
+        "suit": "Clubs",
+        "unicode": "🃒",
+        "color": "black",
+        "value": 2
+    },
+    {
+        "label": "Three",
+        "suit": "Clubs",
+        "unicode": "🃓",
+        "color": "black",
+        "value": 3
+    },
+    {
+        "label": "Four",
+        "suit": "Clubs",
+        "unicode": "🃔",
+        "color": "black",
+        "value": 4
+    },
+    {
+        "label": "Five",
+        "suit": "Clubs",
+        "unicode": "🃕",
+        "color": "black",
+        "value": 5
+    },
+    {
+        "label": "Six",
+        "suit": "Clubs",
+        "unicode": "🃖",
+        "color": "black",
+        "value": 6
+    },
+    {
+        "label": "Seven",
+        "suit": "Clubs",
+        "unicode": "🃗",
+        "color": "black",
+        "value": 7
+    },
+    {
+        "label": "Eight",
+        "suit": "Clubs",
+        "unicode": "🃘",
+        "color": "black",
+        "value": 8
+    },
+    {
+        "label": "Nine",
+        "suit": "Clubs",
+        "unicode": "🃙",
+        "color": "black",
+        "value": 9
+    },
+    {
+        "label": "Ten",
+        "suit": "Clubs",
+        "unicode": "🃚",
+        "color": "black",
+        "value": 10
+    },
+    {
+        "label": "Jack",
+        "suit": "Clubs",
+        "unicode": "🃛",
+        "color": "black",
+        "value": 11
+    },
+    {
+        "label": "Queen",
+        "suit": "Clubs",
+        "unicode": "🃝",
+        "color": "black",
+        "value": 12
+    },
+    {
+        "label": "King",
+        "suit": "Clubs",
+        "unicode": "🃞",
+        "color": "black",
+        "value": 13
+    },
+
+    {
+        "label": "Ace",
+        "suit": "Hearts",
+        "unicode": "🂱",
+        "color": "red",
+        "value": 1
+    },
+    {
+        "label": "Two",
+        "suit": "Hearts",
+        "unicode": "🂲",
+        "color": "red",
+        "value": 2
+    },
+    {
+        "label": "Three",
+        "suit": "Hearts",
+        "unicode": "🂳",
+        "color": "red",
+        "value": 3
+    },
+    {
+        "label": "Four",
+        "suit": "Hearts",
+        "unicode": "🂴",
+        "color": "red",
+        "value": 4
+    },
+    {
+        "label": "Five",
+        "suit": "Hearts",
+        "unicode": "🂵",
+        "color": "red",
+        "value": 5
+    },
+    {
+        "label": "Six",
+        "suit": "Hearts",
+        "unicode": "🂶",
+        "color": "red",
+        "value": 6
+    },
+    {
+        "label": "Seven",
+        "suit": "Hearts",
+        "unicode": "🂷",
+        "color": "red",
+        "value": 7
+    },
+    {
+        "label": "Eight",
+        "suit": "Hearts",
+        "unicode": "🂸",
+        "color": "red",
+        "value": 8
+    },
+    {
+        "label": "Nine",
+        "suit": "Hearts",
+        "unicode": "🂹",
+        "color": "red",
+        "value": 9
+    },
+    {
+        "label": "Ten",
+        "suit": "Hearts",
+        "unicode": "🂺",
+        "color": "red",
+        "value": 10
+    },
+    {
+        "label": "Jack",
+        "suit": "Hearts",
+        "unicode": "🂻",
+        "color": "red",
+        "value": 11
+    },
+    {
+        "label": "Queen",
+        "suit": "Hearts",
+        "unicode": "🂽",
+        "color": "red",
+        "value": 12
+    },
+    {
+        "label": "King",
+        "suit": "Hearts",
+        "unicode": "🂾",
+        "color": "red",
+        "value": 13
+    },
+
+    {
+        "label": "Ace",
+        "suit": "Diamonds",
+        "unicode": "🃁",
+        "color": "red",
+        "value": 1
+    },
+    {
+        "label": "Two",
+        "suit": "Diamonds",
+        "unicode": "🃂",
+        "color": "red",
+        "value": 2
+    },
+    {
+        "label": "Three",
+        "suit": "Diamonds",
+        "unicode": "🃃",
+        "color": "red",
+        "value": 3
+    },
+    {
+        "label": "Four",
+        "suit": "Diamonds",
+        "unicode": "🃄",
+        "color": "red",
+        "value": 4
+    },
+    {
+        "label": "Five",
+        "suit": "Diamonds",
+        "unicode": "🃅",
+        "color": "red",
+        "value": 5
+    },
+    {
+        "label": "Six",
+        "suit": "Diamonds",
+        "unicode": "🃆",
+        "color": "red",
+        "value": 6
+    },
+    {
+        "label": "Seven",
+        "suit": "Diamonds",
+        "unicode": "🃇",
+        "color": "red",
+        "value": 7
+    },
+    {
+        "label": "Eight",
+        "suit": "Diamonds",
+        "unicode": "🃈",
+        "color": "red",
+        "value": 8
+    },
+    {
+        "label": "Nine",
+        "suit": "Diamonds",
+        "unicode": "🃉",
+        "color": "red",
+        "value": 9
+    },
+    {
+        "label": "Ten",
+        "suit": "Diamonds",
+        "unicode": "🃊",
+        "color": "red",
+        "value": 10
+    },
+    {
+        "label": "Jack",
+        "suit": "Diamonds",
+        "unicode": "🃋",
+        "color": "red",
+        "value": 11
+    },
+    {
+        "label": "Queen",
+        "suit": "Diamonds",
+        "unicode": "🃍",
+        "color": "red",
+        "value": 12
+    },
+    {
+        "label": "King",
+        "suit": "Diamonds",
+        "unicode": "🃎",
+        "color": "red",
+        "value": 13
+    }
+]
