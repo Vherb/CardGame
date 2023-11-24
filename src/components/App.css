@@ -67,6 +67,10 @@ button:hover {
   
 }
 
+.card2 {
+    background-color: 'gray';
+}
+
 .dice {
   font-size: 60px; /* Increase the font size for dice */
   background-color: #fff;
