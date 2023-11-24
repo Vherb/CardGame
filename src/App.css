@@ -1,0 +1,73 @@
+/* Remove border and make the container size match the cards */
+
+/* App.css */
+
+body {
+  font-family: Arial, sans-serif;
+  background-color: #f5f5f5;
+  margin: 0;
+  padding: 0;
+}
+
+.App {
+  text-align: center;
+  
+}
+
+h1 {
+  color: #333;
+  font-size: 36px;
+  margin-bottom: 20px;
+}
+p {
+ font-size: 15%;
+}
+ 
+
+
+.game-container {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  flex-wrap: wrap;
+
+}
+.game-card{
+background-color: #EEFEFD;
+}
+
+.game-background{
+background-color: #D3FFF5;
+}
+
+.coin-display {
+  background-color: #fff;
+  border: 1px solid #ddd;
+  padding: 5px;
+  border-radius: 4px;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+button {
+  background-color: #007BFF;
+  color: #fff;
+  font-size: 24px; /* Increase the font size for buttons */
+  padding: 15px 30px; /* Adjust button padding */
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  margin-top: 20px; /* Increase the margin-top for buttons */
+  transition: background-color 0.2s;
+}
+
+button:hover {
+  background-color: #0056b3;
+}
+
+
+
+
+/* card animations */
+
+
+

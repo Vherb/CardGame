@@ -1,0 +1,84 @@
+/* Remove border and make the container size match the cards */
+
+.cards-container .card {
+  border: none;
+}
+
+/* App.css */
+
+body {
+  font-family: Arial, sans-serif;
+  background-color: #ABFCF6;
+  margin: 0;
+  padding: 0;
+}
+
+.App {
+  text-align: center;
+  padding: 20px;
+}
+
+h1 {
+  color: #333;
+  font-size: 36px;
+  margin-bottom: 20px;
+}
+p {
+ font-size: 15%;
+}
+ 
+
+.game-container {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 20px;
+}
+
+.coin-display {
+  background-color: #ABFCF6;
+  border: 1px solid #ddd;
+  padding: 20px;
+  border-radius: 8px;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+button {
+  background-color: #007BFF;
+  color: #fff;
+  font-size: 24px; /* Increase the font size for buttons */
+  padding: 15px 30px; /* Adjust button padding */
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  margin-top: 20px; /* Increase the margin-top for buttons */
+  transition: background-color 0.2s;
+}
+
+button:hover {
+  background-color: #0056b3;
+}
+
+.card {
+  font-size: 100px; /* Increase the font size for cards */
+  background-color: #fff;
+  border: none;
+  
+}
+
+.dice {
+  font-size: 60px; /* Increase the font size for dice */
+  background-color: #fff;
+ 
+ 
+}
+
+/* Style the result and round result elements */
+.result {
+  font-size: 24px;
+  margin-top: 20px; /* Add margin to separate from the elements above */
+  text-align: center; /* Center-align the result text */
+}
+
+/* card animations */
