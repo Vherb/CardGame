@@ -78,7 +78,7 @@ function Game2() {
 
 
     return (
-            <h1> Charlie mf game </h1>
+            <h1> Charlie mf gammmmmmmmmmmmmmme </h1>
     );
 }
 
