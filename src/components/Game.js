@@ -175,8 +175,8 @@ function Game() {
             setDiceValue2(roll2);
 
             // Convert face cards and Ace to their correct values
-            const cardValue1Number = getCardValue(cardValue1);
-            const cardValue2Number = getCardValue(cardValue2);
+            const cardValue1Number = getCardValue(cardValue1.unicode);
+            const cardValue2Number = getCardValue(cardValue2.unicode);
 
             const sum = roll1 + roll2;
 
