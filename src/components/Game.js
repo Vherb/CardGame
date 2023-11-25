@@ -50,61 +50,61 @@ const CustomPaper = styled(Paper)(({ theme }) => ({
 
 function Game() {
     const cardValues = [
-        { label: 'Ace', suit: 'Spades', unicode: '🂡' },
-        { label: '2', suit: 'Spades', unicode: '🂢' },
-        { label: '3', suit: 'Spades', unicode: '🂣' },
-        { label: '4', suit: 'Spades', unicode: '🂤' },
-        { label: '5', suit: 'Spades', unicode: '🂥' },
-        { label: '6', suit: 'Spades', unicode: '🂦' },
-        { label: '7', suit: 'Spades', unicode: '🂧' },
-        { label: '8', suit: 'Spades', unicode: '🂨' },
-        { label: '9', suit: 'Spades', unicode: '🂩' },
-        { label: '10', suit: 'Spades', unicode: '🂪' },
-        { label: 'Jack', suit: 'Spades', unicode: '🂫' },
-        { label: 'Queen', suit: 'Spades', unicode: '🂭' },
-        { label: 'King', suit: 'Spades', unicode: '🂮' },
+        { label: 'Ace', suit: 'Spades', unicode: '🂡', color: 'black' },
+        { label: '2', suit: 'Spades', unicode: '🂢', color: 'black' },
+        { label: '3', suit: 'Spades', unicode: '🂣', color: 'black' },
+        { label: '4', suit: 'Spades', unicode: '🂤', color: 'black' },
+        { label: '5', suit: 'Spades', unicode: '🂥', color: 'black' },
+        { label: '6', suit: 'Spades', unicode: '🂦', color: 'black' },
+        { label: '7', suit: 'Spades', unicode: '🂧', color: 'black' },
+        { label: '8', suit: 'Spades', unicode: '🂨', color: 'black' },
+        { label: '9', suit: 'Spades', unicode: '🂩', color: 'black' },
+        { label: '10', suit: 'Spades', unicode: '🂪', color: 'black' },
+        { label: 'Jack', suit: 'Spades', unicode: '🂫', color: 'black' },
+        { label: 'Queen', suit: 'Spades', unicode: '🂭', color: 'black' },
+        { label: 'King', suit: 'Spades', unicode: '🂮', color: 'black' },
 
         { label: 'Ace', suit: 'Clubs', unicode: '🃑' },
-        { label: '2', suit: 'Clubs', unicode: '🃒' },
-        { label: '3', suit: 'Clubs', unicode: '🃓' },
-        { label: '4', suit: 'Clubs', unicode: '🃔' },
-        { label: '5', suit: 'Clubs', unicode: '🃕' },
-        { label: '6', suit: 'Clubs', unicode: '🃖' },
-        { label: '7', suit: 'Clubs', unicode: '🃗' },
-        { label: '8', suit: 'Clubs', unicode: '🃘' },
-        { label: '9', suit: 'Clubs', unicode: '🃙' },
-        { label: '10', suit: 'Clubs', unicode: '🃚' },
-        { label: 'Jack', suit: 'Clubs', unicode: '🃛' },
-        { label: 'Queen', suit: 'Clubs', unicode: '🃝' },
-        { label: 'King', suit: 'Clubs', unicode: '🃞' },
+        { label: '2', suit: 'Clubs', unicode: '🃒', color: 'black' },
+        { label: '3', suit: 'Clubs', unicode: '🃓', color: 'black' },
+        { label: '4', suit: 'Clubs', unicode: '🃔', color: 'black' },
+        { label: '5', suit: 'Clubs', unicode: '🃕', color: 'black' },
+        { label: '6', suit: 'Clubs', unicode: '🃖', color: 'black' },
+        { label: '7', suit: 'Clubs', unicode: '🃗', color: 'black' },
+        { label: '8', suit: 'Clubs', unicode: '🃘', color: 'black' },
+        { label: '9', suit: 'Clubs', unicode: '🃙', color: 'black' },
+        { label: '10', suit: 'Clubs', unicode: '🃚', color: 'black' },
+        { label: 'Jack', suit: 'Clubs', unicode: '🃛', color: 'black' },
+        { label: 'Queen', suit: 'Clubs', unicode: '🃝', color: 'black' },
+        { label: 'King', suit: 'Clubs', unicode: '🃞', color: 'black' },
 
-        { label: 'Ace', suit: 'Hearts', unicode: '🂱' },
-        { label: '2', suit: 'Hearts', unicode: '🂲' },
-        { label: '3', suit: 'Hearts', unicode: '🂳' },
-        { label: '4', suit: 'Hearts', unicode: '🂴' },
-        { label: '5', suit: 'Hearts', unicode: '🂵' },
-        { label: '6', suit: 'Hearts', unicode: '🂶' },
-        { label: '7', suit: 'Hearts', unicode: '🂷' },
-        { label: '8', suit: 'Hearts', unicode: '🂸' },
-        { label: '9', suit: 'Hearts', unicode: '🂹' },
-        { label: '10', suit: 'Hearts', unicode: '🂺' },
-        { label: 'Jack', suit: 'Hearts', unicode: '🂻' },
-        { label: 'Queen', suit: 'Hearts', unicode: '🂽' },
-        { label: 'King', suit: 'Hearts', unicode: '🂾' },
+        { label: 'Ace', suit: 'Hearts', unicode: '🂱', color: 'red' },
+        { label: '2', suit: 'Hearts', unicode: '🂲', color: 'red' },
+        { label: '3', suit: 'Hearts', unicode: '🂳', color: 'red' },
+        { label: '4', suit: 'Hearts', unicode: '🂴', color: 'red' },
+        { label: '5', suit: 'Hearts', unicode: '🂵', color: 'red' },
+        { label: '6', suit: 'Hearts', unicode: '🂶', color: 'red' },
+        { label: '7', suit: 'Hearts', unicode: '🂷', color: 'red' },
+        { label: '8', suit: 'Hearts', unicode: '🂸', color: 'red' },
+        { label: '9', suit: 'Hearts', unicode: '🂹', color: 'red' },
+        { label: '10', suit: 'Hearts', unicode: '🂺', color: 'red' },
+        { label: 'Jack', suit: 'Hearts', unicode: '🂻', color: 'red' },
+        { label: 'Queen', suit: 'Hearts', unicode: '🂽', color: 'red' },
+        { label: 'King', suit: 'Hearts', unicode: '🂾', color: 'red' },
 
-        { label: 'Ace', suit: 'Diamonds', unicode: '🃁' },
-        { label: '2', suit: 'Diamonds', unicode: '🃂' },
-        { label: '3', suit: 'Diamonds', unicode: '🃃' },
-        { label: '4', suit: 'Diamonds', unicode: '🃄' },
-        { label: '5', suit: 'Diamonds', unicode: '🃅' },
-        { label: '6', suit: 'Diamonds', unicode: '🃆' },
-        { label: '7', suit: 'Diamonds', unicode: '🃇' },
-        { label: '8', suit: 'Diamonds', unicode: '🃈' },
-        { label: '9', suit: 'Diamonds', unicode: '🃉' },
-        { label: '10', suit: 'Diamonds', unicode: '🃊' },
-        { label: 'Jack', suit: 'Diamonds', unicode: '🃋' },
-        { label: 'Queen', suit: 'Diamonds', unicode: '🃍' },
-        { label: 'King', suit: 'Diamonds', unicode: '🃎' },
+        { label: 'Ace', suit: 'Diamonds', unicode: '🃁', color: 'red' },
+        { label: '2', suit: 'Diamonds', unicode: '🃂', color: 'red' },
+        { label: '3', suit: 'Diamonds', unicode: '🃃', color: 'red' },
+        { label: '4', suit: 'Diamonds', unicode: '🃄', color: 'red' },
+        { label: '5', suit: 'Diamonds', unicode: '🃅', color: 'red' },
+        { label: '6', suit: 'Diamonds', unicode: '🃆', color: 'red' },
+        { label: '7', suit: 'Diamonds', unicode: '🃇', color: 'red' },
+        { label: '8', suit: 'Diamonds', unicode: '🃈', color: 'red' },
+        { label: '9', suit: 'Diamonds', unicode: '🃉', color: 'red' },
+        { label: '10', suit: 'Diamonds', unicode: '🃊', color: 'red' },
+        { label: 'Jack', suit: 'Diamonds', unicode: '🃋', color: 'red' },
+        { label: 'Queen', suit: 'Diamonds', unicode: '🃍', color: 'red' },
+        { label: 'King', suit: 'Diamonds', unicode: '🃎', color: 'red', },
     ];
 
     const theme = createTheme();
@@ -153,8 +153,8 @@ function Game() {
             const index1 = Math.floor(Math.random() * cardValues.length);
             const index2 = Math.floor(Math.random() * cardValues.length);
 
-            setCardValue1(cardValues[index1].unicode);
-            setCardValue2(cardValues[index2].unicode);
+            setCardValue1(cardValues[index1]);
+            setCardValue2(cardValues[index2]);
 
             setResult('');
             setRoundOver(false);
@@ -335,14 +335,16 @@ function Game() {
                                     <CardContainer className='cards-container'>
                                         <CardItem className='card-item'>
                                             <MyCard
-                                                value={cardValue1}
+                                                value={cardValue1.unicode}
                                                 fontSize='150px'
+                                                color={cardValue1.color}
                                             />
                                         </CardItem>
                                         <CardItem className='card-item'>
                                             <MyCard
-                                                value={cardValue2}
+                                                value={cardValue2.unicode}
                                                 fontSize='150px'
+                                                color={cardValue2.color}
                                             />
                                         </CardItem>
                                     </CardContainer>
