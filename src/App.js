@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import Game from './components/Game';
-import Game2 from './components/Game2';
+import InBetweenGame from './components/games/inBetween/InBetween';
 import './App.css'; // You can add CSS styles here
 import 'bootstrap/dist/css/bootstrap.min.css';
 import RegistrationForm from './components/RegistrationForm'; // Import your existing RegistrationForm component
@@ -28,7 +28,7 @@ function App() {
     return (
         <Routes>
             <Route path='/' element={<Home />} />
-            <Route path='/game2' element={<Game2 />} />
+            <Route path='/game2' element={<InBetweenGame />} />
         </Routes>
     );
 }
