@@ -17,6 +17,12 @@ const InBetweenGame = () => {
         NOT_STARTED: 'NOT_STARTED', // Freshly loaded screen, default stage
         FIRST_STAGE: 'FIRST_STAGE', // First 2 cards have been drawn
         FINISHED: 'FINISHED', // Third card has been drawn
+        NOT_ENOUGH_CARDS: 'NOT_ENOUGH_CARDS', // When the deck does not have enough cards to play the game (< 3)
+    };
+
+    const Selection = {
+        YES: 'YES',
+        NO: 'NO',
     };
 
     /** State variables **/
@@ -24,7 +30,10 @@ const InBetweenGame = () => {
     const [firstCard, setFirstCard] = React.useState({});
     const [secondCard, setSecondCard] = React.useState({});
     const [thirdCard, setThirdCard] = React.useState({});
-    const [isPlaying, setIsPlaying] = React.useState(false); // TODO: Replace with setGameStage state
+    const [gameStage, setGameStage] = React.useState(GameStage.NOT_STARTED);
+    const [selection, setSelection] = React.useState('');
+    const [winStreak, setWinStreak] = React.useState(0);
+    const [highestStreak, setHighestStreak] = React.useState(0);
 
     /** Helper functions **/
     const drawFirstCard = () => {
@@ -36,14 +45,40 @@ const InBetweenGame = () => {
     };
 
     const drawFirstTwoCards = () => {
-        setIsPlaying(true);
+        setGameStage(GameStage.FIRST_STAGE);
+        setSelection('');
         setThirdCard({});
         drawFirstCard();
         drawSecondCard();
     };
 
-    const drawThirdCard = () => {
-        setThirdCard(cards.shift());
+    const drawThirdCard = (choice) => {
+        setSelection(choice);
+        const drawnCard = cards.shift();
+        setThirdCard(drawnCard);
+        handleScoring(drawnCard, choice);
+        setGameStage(GameStage.FINISHED);
+    };
+
+    const handleScoring = (selectedCard, choice) => {
+        const lowCard = Math.min(firstCard.value, secondCard.value);
+        const highCard = Math.max(firstCard.value, secondCard.value);
+        const isThirdCardBetween =
+            lowCard < selectedCard.value && highCard > selectedCard.value;
+        const isWinner =
+            (choice === Selection.YES && isThirdCardBetween) ||
+            (choice === Selection.NO && !isThirdCardBetween);
+
+        const streak = isWinner ? winStreak + 1 : 0;
+        setWinStreak(streak);
+        setHighestStreak(streak > highestStreak ? streak : highestStreak);
+    };
+
+    const shouldDisplayDecisionPrompt = () => {
+        return (
+            gameStage === GameStage.FIRST_STAGE ||
+            gameStage === GameStage.FINISHED
+        );
     };
 
     /** Components **/
@@ -85,18 +120,28 @@ const InBetweenGame = () => {
                 >
                     <Grid item>
                         <Button
-                            variant='outlined'
+                            variant={
+                                selection === Selection.YES
+                                    ? 'contained'
+                                    : 'outlined'
+                            }
                             color='success'
-                            onClick={() => drawThirdCard()}
+                            onClick={() => drawThirdCard(Selection.YES)}
+                            disabled={gameStage === GameStage.FINISHED}
                         >
                             Yes
                         </Button>
                     </Grid>
                     <Grid item>
                         <Button
-                            variant='outlined'
+                            variant={
+                                selection === Selection.NO
+                                    ? 'contained'
+                                    : 'outlined'
+                            }
                             color='error'
-                            onClick={() => drawThirdCard()}
+                            onClick={() => drawThirdCard(Selection.NO)}
+                            disabled={gameStage === GameStage.FINISHED}
                         >
                             No
                         </Button>
@@ -108,6 +153,8 @@ const InBetweenGame = () => {
 
     return (
         <>
+            <Typography>Win streak: {winStreak}</Typography>
+            <Typography>Highest streak: {highestStreak}</Typography>
             <center>
                 <Card
                     unicodeValue={CARD_BACK}
@@ -142,7 +189,9 @@ const InBetweenGame = () => {
                             </Typography>
                         </center>
                     </Grid>
-                    <Grid item>{isPlaying && <DecisionPrompt />}</Grid>
+                    <Grid item>
+                        {shouldDisplayDecisionPrompt() && <DecisionPrompt />}
+                    </Grid>
                     <Grid item>
                         <center>
                             <Card
