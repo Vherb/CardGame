@@ -1,85 +1,178 @@
 import React from 'react';
-import { Divider, Grid, Typography } from '@mui/material';
+import { Button, Divider, Grid, Typography } from '@mui/material';
 import cardDataJson from '../../../data/cardData.json';
 import './InBetween.css';
+import arrow from '../../../assets/arrow.png'; // Tell webpack this JS file uses this image
 
 const InBetweenGame = () => {
+    /** Variables **/
+    const CARD_BACK = '🂠';
     const cardData = JSON.parse(JSON.stringify(cardDataJson));
-
-    const cardBack = '🂠';
-
     const shuffledCards = cardData
         .map((value) => ({ value, sort: Math.random() }))
         .sort((a, b) => a.sort - b.sort)
         .map(({ value }) => value);
 
+    const GameStage = {
+        NOT_STARTED: 'NOT_STARTED', // Freshly loaded screen, default stage
+        FIRST_STAGE: 'FIRST_STAGE', // First 2 cards have been drawn
+        FINISHED: 'FINISHED', // Third card has been drawn
+    };
 
+    /** State variables **/
     const [cards, setCards] = React.useState(shuffledCards);
-    const [firstCard, setFirstCard] = React.useState({})
-    const [secondCard, setSecondCard] = React.useState({})
+    const [firstCard, setFirstCard] = React.useState({});
+    const [secondCard, setSecondCard] = React.useState({});
+    const [thirdCard, setThirdCard] = React.useState({});
+    const [isPlaying, setIsPlaying] = React.useState(false);
 
-
+    /** Helper functions **/
     const drawFirstCard = () => {
-        setFirstCard(cards.shift())
-    }
+        setFirstCard(cards.shift());
+    };
 
     const drawSecondCard = () => {
-        setSecondCard(cards.shift())
-    }
+        setSecondCard(cards.shift());
+    };
 
-    const drawCards = () => {
-        drawFirstCard()
-        drawSecondCard()
-    }
+    const drawFirstTwoCards = () => {
+        setIsPlaying(true);
+        setThirdCard({});
+        drawFirstCard();
+        drawSecondCard();
+    };
+
+    const drawThirdCard = () => {
+        setThirdCard(cards.shift());
+    };
+
+    /** Components **/
+    /**
+     * Card component - Used to draw a card on the screen
+     */
+    const Card = ({ unicodeValue, fontSize, color, onClick }) => {
+        return (
+            <div
+                onClick={onClick}
+                className='card2'
+                style={{ color: color, fontSize }}
+            >
+                {unicodeValue}
+            </div>
+        );
+    };
+
+    const DecisionPrompt = () => {
+        return (
+            <center>
+                <img
+                    src={arrow}
+                    alt='Double-ended arrow'
+                    style={{ width: 200 }}
+                />
+                <br />
+                <Typography>Will the next card be in-between?</Typography>
+                <Grid
+                    container
+                    columns={2}
+                    columnSpacing={1}
+                    justifyContent='center'
+                    alignItems='center'
+                    style={{ marginTop: 10 }}
+                >
+                    <Grid item>
+                        <Button
+                            variant='outlined'
+                            color='success'
+                            onClick={() => drawThirdCard()}
+                        >
+                            Yes
+                        </Button>
+                    </Grid>
+                    <Grid item>
+                        <Button
+                            variant='outlined'
+                            color='error'
+                            onClick={() => drawThirdCard()}
+                        >
+                            No
+                        </Button>
+                    </Grid>
+                </Grid>
+            </center>
+        );
+    };
 
     return (
         <>
             <center>
-                <Card value={cardBack} fontSize='200px' color='navy' onClick={() => drawCards()} />
+                <Card
+                    unicodeValue={CARD_BACK}
+                    fontSize='150px'
+                    color='navy'
+                    onClick={() => drawFirstTwoCards()}
+                />
                 <h3>Cards Remaining: {cards.length}</h3>
             </center>
 
             <Divider style={{ backgroundColor: 'blue' }} />
             <Grid
                 container
-                columns={2}
-                columnSpacing={60}
+                columns={3}
+                columnSpacing={20}
                 alignItems='center'
                 justifyContent='center'
             >
                 <>
                     <Grid item>
-                        <h1> { firstCard.label !== undefined ? `${firstCard.label} of ${firstCard.suit}` : '' } </h1>
-                        <Card
-                            value={firstCard.unicode}
-                            fontSize='150px'
-                            color={firstCard.color}
-                        />
+                        <center>
+                            <Card
+                                unicodeValue={firstCard.unicode}
+                                fontSize='150px'
+                                color={firstCard.color}
+                            />
+
+                            <Typography>
+                                {firstCard.label !== undefined
+                                    ? `${firstCard.label} of ${firstCard.suit}`
+                                    : ''}
+                            </Typography>
+                        </center>
                     </Grid>
+                    <Grid item>{isPlaying && <DecisionPrompt />}</Grid>
                     <Grid item>
-                        <h1> { secondCard.label !== undefined ? `${secondCard.label} of ${secondCard.suit}` : '' } </h1>
-                        <Card
-                            value={secondCard.unicode}
-                            fontSize='150px'
-                            color={secondCard.color}
-                        />
+                        <center>
+                            <Card
+                                unicodeValue={secondCard.unicode}
+                                fontSize='150px'
+                                color={secondCard.color}
+                            />
+                            <Typography>
+                                {secondCard.label !== undefined
+                                    ? `${secondCard.label} of ${secondCard.suit}`
+                                    : ''}
+                            </Typography>
+                        </center>
                     </Grid>
                 </>
             </Grid>
+            <center>
+                {thirdCard && (
+                    <Card
+                        unicodeValue={thirdCard.unicode}
+                        fontSize='150px'
+                        color={thirdCard.color}
+                    />
+                )}
+
+                <Typography>
+                    {thirdCard.label !== undefined
+                        ? `${thirdCard.label} of ${thirdCard.suit}`
+                        : ''}
+                </Typography>
+            </center>
         </>
     );
-}
-
-function Card({ value, fontSize, color, onClick }) {
-    return (
-        <div
-            onClick={onClick}
-            className='card2'
-            style={{ color: color, fontSize }}
-        >
-            {value}
-        </div>
-    );
-}
+};
 
 export default InBetweenGame;
