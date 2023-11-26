@@ -1,0 +1,20 @@
+/* Styling for the jackpot description */
+.jackpot-description {
+    padding: 16px;
+    background: #4CAF50; /* Background color for the jackpot description */
+    color: #fff; /* Text color for the jackpot description */
+    text-align: center;
+    font-weight: bold;
+    font-size: 24px;
+    margin-bottom: 16px;
+    border: 2px solid #388E3C; /* Border color for the jackpot description */
+    border-radius: 10px; /* Border radius for the jackpot description */
+  }
+  
+  /* Styling for the dice character */
+  .jackpot-dice {
+    font-size: 50px; /* Adjust the font size for the dice character */
+    margin-right: 8px; /* Add some spacing between the dice and text */
+    color : #000000
+  }
+  
