@@ -386,8 +386,12 @@ function Game() {
 					<ul>
 						<li>
 							If the sum of the dice rolls equals the combined value of the two
-							drawn cards, you win{" "}
-							<span className='fw-bold bg-warning'>5x</span> your bet.
+							drawn cards, you{" "}
+							<span className='fw-bold bg-warning'>Win 5x</span> your bet.
+						</li>
+                        <li>
+							 Draw <span className='jackpot-card'> &#127169; &#127153;</span> and roll <span className='jackpot-dice'> &#9856; &#9856;</span>
+							<span className='fw-bold bg-warning'>Win 50x</span> your bet.
 						</li>
 						<li>
 							If you tie with the cards, you get your bet back. Multiplier goes
@@ -405,7 +409,6 @@ function Game() {
 					</ul>
 				</Typography>
 			</CustomPaper>
-			{/* Conditional rendering for the jackpot message */}
 		</ThemeProvider>
 	);
 }
