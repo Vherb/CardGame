@@ -1,24 +1,65 @@
 /* Styling for the jackpot description */
 .jackpot-description {
-    padding: 16px;
-    background: #4CAF50; /* Background color for the jackpot description */
-    color: #fff; /* Text color for the jackpot description */
-    text-align: center;
-    font-weight: bold;
-    font-size: 24px;
-    margin-bottom: 16px;
-    border: 2px solid #388E3C; /* Border color for the jackpot description */
-    border-radius: 10px; /* Border radius for the jackpot description */
-  }
-  
-  /* Styling for the dice character */
-  .jackpot-dice {
-    font-size: 50px; /* Adjust the font size for the dice character */
-    color : #000000
-  }
-  .jackpot-card {
-    font-size: 60px; /* Adjust the font size for the dice character */
-    margin-right: 8px; /* Add some spacing between the dice and text */
-    color : red
-  }
-  
+	padding: 16px;
+	background: #4caf50; /* Background color for the jackpot description */
+	color: #fff; /* Text color for the jackpot description */
+	text-align: center;
+	font-weight: bold;
+	font-size: 24px;
+	margin-bottom: 16px;
+	border: 2px solid #388e3c; /* Border color for the jackpot description */
+	border-radius: 10px; /* Border radius for the jackpot description */
+}
+
+/* Styling for the dice character */
+.jackpot-dice {
+	font-size: 50px; /* Adjust the font size for the dice character */
+	color: #000000;
+}
+.jackpot-card {
+	font-size: 60px; /* Adjust the font size for the dice character */
+	margin-right: 8px; /* Add some spacing between the dice and text */
+	color: red;
+}
+
+/* Styling for the result box */
+.round-result-box {
+	width: 50%; /* You can change this value as needed */
+	max-width: 200px; /* Add a max-width to limit the width */
+	height: auto; /* Remove fixed height */
+	background-color: lightblue;
+	color: black;
+	padding: 5px;
+	border-radius: 5px;
+	text-align: center;
+	margin: 0 auto;
+	display: flex;
+	align-items: center; /* Vertically center the content */
+	justify-content: center; /* Horizontally center the content */
+	flex-direction: column; /* Stack children vertically */
+}
+
+/* Styling for the balance box */
+.balance-box {
+	width: 50%; /* You can change this value as needed */
+	max-width: 200px; /* Add a max-width to limit the width */
+	height: auto; /* Remove fixed height */
+	background-color: lightgreen;
+	color: black;
+	padding: 5px;
+	border-radius: 5px;
+	text-align: center;
+	margin: 0 auto;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	flex-direction: column; /* Stack children vertically */
+}
+
+/* Add margin to the results label */
+.results-label {
+	margin-bottom: 5px; /* Add some spacing between label and result */
+	font-weight: bold; /* Make the label bold */
+	font-size: 50px; /* Adjust the font size as needed */
+	color: #333; /* Change the label text color as needed */
+}

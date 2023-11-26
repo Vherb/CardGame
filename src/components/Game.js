@@ -276,9 +276,11 @@ function Game() {
 							<Typography variant='h6'>
 								<u>Balance</u>
 							</Typography>
-							<Typography variant='body1'>
-								<b>$</b> {coins}
-							</Typography>
+							<div className='balance-box'>
+								<Typography variant='body1'>
+									<b>$</b> {coins}
+								</Typography>
+							</div>
 							<input
 								type='number'
 								className='form-control mb-6'
@@ -332,7 +334,14 @@ function Game() {
 								</Button>
 							)}
 
-							<Typography variant='body1'>{roundResult}</Typography>
+							<div className='round-result-box '>
+								<Typography variant='body1' className='results-label'>
+									Results
+								</Typography>
+								<Typography variant='body1' className='round-result'>
+									{roundResult}
+								</Typography>
+							</div>
 							{jackpotInProgress && (
 								<div className='jackpot-description'>
 									JACKPOT IN PROGRESS! Roll{" "}
@@ -389,8 +398,9 @@ function Game() {
 							drawn cards, you{" "}
 							<span className='fw-bold bg-warning'>Win 5x</span> your bet.
 						</li>
-                        <li>
-							 Draw <span className='jackpot-card'> &#127169; &#127153;</span> and roll <span className='jackpot-dice'> &#9856; &#9856;</span>
+						<li>
+							Draw <span className='jackpot-card'> &#127169; &#127153;</span>{" "}
+							and roll <span className='jackpot-dice'> &#9856; &#9856;</span>
 							<span className='fw-bold bg-warning'>Win 50x</span> your bet.
 						</li>
 						<li>
