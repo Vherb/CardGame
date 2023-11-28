@@ -29,6 +29,7 @@ function App() {
         <Routes>
             <Route path='/' element={<Home />} />
             <Route path='/game2' element={<InBetweenGame />} />
+            <Route path='/registration' element={<RegistrationForm />} />
         </Routes>
     );
 }
@@ -47,6 +48,10 @@ function Home() {
                             </Nav.Link>
                             <Nav.Link href='#'>Deposit</Nav.Link>
                             <Nav.Link href='/game2'>In-Between</Nav.Link>
+                            <Link to='/registration' style={{ marginRight: '10px' }}>
+                                Register
+                            </Link>
+
                         </Nav>
                     </Navbar.Collapse>
                 </Container>
