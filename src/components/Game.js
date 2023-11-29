@@ -138,31 +138,29 @@ function Game() {
 
 
 
-	const [account, setAccount] = useState(null);
-
 	useEffect(() => {
 		setCoins(100);
-	  }, []);
-  
+	}, []);
+
 	useEffect(() => {
 		// Replace 'YOUR_PUBLIC_KEY' with the actual public key of the account you want to query
-		const publicKey = 'GDD3QDSS2ZTJNDFF6ZK7D4XNMPH6W7Z3RW5CZPIV56ZW522MHPROFR27';
-	  
+		const publicKey =
+			"GDD3QDSS2ZTJNDFF6ZK7D4XNMPH6W7Z3RW5CZPIV56ZW522MHPROFR27";
+
 		// Create a new instance of the Stellar Server
-		const server = new StellarSdk.Server('https://horizon-testnet.stellar.org');
-	  
+		const server = new StellarSdk.Server("https://horizon-testnet.stellar.org");
+
 		console.log("Public Key:", publicKey);
 
-server.loadAccount(publicKey)
-  .then((loadedAccount) => {
-    console.log("Account loaded successfully:", loadedAccount);
-  })
-  .catch((error) => {
-    console.error("Error loading account:", error);
-  });
-		  
-	  }, []); // The empty dependency array ensures this effect runs only once when the component mounts
-
+		server
+			.loadAccount(publicKey)
+			.then((loadedAccount) => {
+				console.log("Account loaded successfully:", loadedAccount);
+			})
+			.catch((error) => {
+				console.error("Error loading account:", error);
+			});
+	}, []); // The empty dependency array ensures this effect runs only once when the component mounts
 
 	const toggleDescription = () => {
 		setDescriptionCollapsed(!descriptionCollapsed);
@@ -218,105 +216,98 @@ server.loadAccount(publicKey)
 	};
 	const doubleDown = () => {
 		if (!roundOver && !doubledDown && !doubleDownUsed) {
-		  const newBet = bet * 2; // Double the current bet
-	  
-		  // Check if there are enough coins for the new bet
-		  if (coins - newBet < 0) {
-			setResult("Not enough coins to double down.");
-			return;
-		  }
-	  
-		  // Update the payoutMultiplier by adding 0.5
-		  setPayoutMultiplier((prevMultiplier) => prevMultiplier + 0.1);
-	  
-		  // Subtract the doubled bet from coins once using a functional update
-		  setCoins(coins - bet);
-	  
-		  setBet(newBet);
-		  setDoubledDown(true); // Set doubledDown to true to prevent multiple double downs
-		  setDoubleDownUsed(true); // Set doubleDownUsed to true to prevent double down from being used again
-		}
-	  };
-	  
-	  
-	  
-	  
-	  
-	  
-	  
-	  // Add a new function to reset doubleDownUsed when the round is over
-	  const resetDoubleDownUsed = () => {
-		setDoubleDownUsed(false);
-	  };
-	  const rollDice = () => {
-		if (!roundOver) {
-		  // Generate random dice rolls (assuming a standard 6-sided die)
-		  const roll1 = Math.floor(Math.random() * 6) + 1;
-		  const roll2 = Math.floor(Math.random() * 6) + 1;
-	  
-		  setDiceValue1(roll1);
-		  setDiceValue2(roll2);
-	  
-		  // Convert face cards and Ace to their correct values
-		  const cardValue1Number = getCardValue(cardValue1.unicode);
-		  const cardValue2Number = getCardValue(cardValue2.unicode);
-	  
-		  const sum = roll1 + roll2;
-	  
-		  if (sum === cardValue1Number + cardValue2Number) {
-			// If the sum of dice equals the combined value of cards, you win 10 times the bet
-			const winnings = bet * 5;
-			const newBalance = (parseFloat(coins) + winnings).toFixed(2);
-			setCoins(newBalance);
-			setPayoutMultiplier(parseFloat((payoutMultiplier + 2.0).toFixed(1)));
-			setRoundResult(`You won $${winnings.toFixed(2)}! (5x)`);
-		  } else if (sum === cardValue1Number || sum === cardValue2Number) {
-			// If the sum matches one of the card values, it's a tie
-			const tieWinnings = bet;
-			const newBalance = (parseFloat(coins) + tieWinnings).toFixed(2);
-			setCoins(newBalance);
-			setPayoutMultiplier(parseFloat((payoutMultiplier + 0.1).toFixed(1)));
-			setRoundResult(`It's a tie! You get your bet back.`);
-		  } else if (
-			(sum > cardValue1Number && sum < cardValue2Number) ||
-			(sum < cardValue1Number && sum > cardValue2Number)
-		  ) {
-			// You win when the sum falls between the two card values
-			const winnings = bet * payoutMultiplier;
-			const newBalance = (parseFloat(coins) + winnings).toFixed(2);
-			setCoins(newBalance);
-	  
-			// Increase the payoutMultiplier by 0.2x for the next round (rounded to 1 decimal place)
-			setPayoutMultiplier(parseFloat((payoutMultiplier + 0.3).toFixed(1)));
-			setRoundResult(`You won $${winnings.toFixed(2)}!`);
-		  } else {
-			// Check for two ones rolled and jackpot in progress
-			if (roll1 === 1 && roll2 === 1 && jackpotInProgress) {
-			  // Special win condition: Two ones rolled and jackpot is in progress
-			  const JackpotWin = bet * 50;
-			  const newBalance = (parseFloat(coins) + JackpotWin).toFixed(2);
-			  setCoins(newBalance);
-			  setRoundResult(
-				`Special win! You won $${JackpotWin.toFixed(2)}! (50x)`
-			  );
-			} else {
-			  // You lose when the sum is outside the range
-			  const lostCoins = bet;
-	  
-			  setRoundResult(`You lost $${lostCoins.toFixed(2)}!`);
-	  
-			  // Reset the payoutMultiplier to its initial value when you lose
-			  setPayoutMultiplier(1.2);
+			const newBet = bet * 2; // Double the current bet
+
+			// Check if there are enough coins for the new bet
+			if (coins - newBet < 0) {
+				setResult("Not enough coins to double down.");
+				return;
 			}
-		  }
-		  setJackpotInProgress(false);
-		  // Set the roundOver flag to true
-		  setRoundOver(true);
-		   // Reset doubleDownUsed when the round is over
-		   resetDoubleDownUsed();
+
+			// Update the payoutMultiplier by adding 0.5
+			setPayoutMultiplier((prevMultiplier) => prevMultiplier + 0.1);
+
+			// Subtract the doubled bet from coins once using a functional update
+			setCoins(coins - bet);
+
+			setBet(newBet);
+			setDoubledDown(true); // Set doubledDown to true to prevent multiple double downs
+			setDoubleDownUsed(true); // Set doubleDownUsed to true to prevent double down from being used again
 		}
-	  };
-	
+	};
+
+	// Add a new function to reset doubleDownUsed when the round is over
+	const resetDoubleDownUsed = () => {
+		setDoubleDownUsed(false);
+	};
+	const rollDice = () => {
+		if (!roundOver) {
+			// Generate random dice rolls (assuming a standard 6-sided die)
+			const roll1 = Math.floor(Math.random() * 6) + 1;
+			const roll2 = Math.floor(Math.random() * 6) + 1;
+
+			setDiceValue1(roll1);
+			setDiceValue2(roll2);
+
+			// Convert face cards and Ace to their correct values
+			const cardValue1Number = getCardValue(cardValue1.unicode);
+			const cardValue2Number = getCardValue(cardValue2.unicode);
+
+			const sum = roll1 + roll2;
+
+			if (sum === cardValue1Number + cardValue2Number) {
+				// If the sum of dice equals the combined value of cards, you win 10 times the bet
+				const winnings = bet * 5;
+				const newBalance = (parseFloat(coins) + winnings).toFixed(2);
+				setCoins(newBalance);
+				setPayoutMultiplier(parseFloat((payoutMultiplier + 2.0).toFixed(1)));
+				setRoundResult(`You won $${winnings.toFixed(2)}! (5x)`);
+			} else if (sum === cardValue1Number || sum === cardValue2Number) {
+				// If the sum matches one of the card values, it's a tie
+				const tieWinnings = bet;
+				const newBalance = (parseFloat(coins) + tieWinnings).toFixed(2);
+				setCoins(newBalance);
+				setPayoutMultiplier(parseFloat((payoutMultiplier + 0.1).toFixed(1)));
+				setRoundResult(`It's a tie! You get your bet back.`);
+			} else if (
+				(sum > cardValue1Number && sum < cardValue2Number) ||
+				(sum < cardValue1Number && sum > cardValue2Number)
+			) {
+				// You win when the sum falls between the two card values
+				const winnings = bet * payoutMultiplier;
+				const newBalance = (parseFloat(coins) + winnings).toFixed(2);
+				setCoins(newBalance);
+
+				// Increase the payoutMultiplier by 0.2x for the next round (rounded to 1 decimal place)
+				setPayoutMultiplier(parseFloat((payoutMultiplier + 0.3).toFixed(1)));
+				setRoundResult(`You won $${winnings.toFixed(2)}!`);
+			} else {
+				// Check for two ones rolled and jackpot in progress
+				if (roll1 === 1 && roll2 === 1 && jackpotInProgress) {
+					// Special win condition: Two ones rolled and jackpot is in progress
+					const JackpotWin = bet * 50;
+					const newBalance = (parseFloat(coins) + JackpotWin).toFixed(2);
+					setCoins(newBalance);
+					setRoundResult(
+						`Special win! You won $${JackpotWin.toFixed(2)}! (50x)`
+					);
+				} else {
+					// You lose when the sum is outside the range
+					const lostCoins = bet;
+
+					setRoundResult(`You lost $${lostCoins.toFixed(2)}!`);
+
+					// Reset the payoutMultiplier to its initial value when you lose
+					setPayoutMultiplier(1.2);
+				}
+			}
+			setJackpotInProgress(false);
+			// Set the roundOver flag to true
+			setRoundOver(true);
+			// Reset doubleDownUsed when the round is over
+			resetDoubleDownUsed();
+		}
+	};
 
 	const getCardValue = (card) => {
 		const selectedCard = cardValues.find((c) => c.unicode === card);
@@ -403,11 +394,15 @@ server.loadAccount(publicKey)
 									Roll Dice
 								</Button>
 							)}
-  {!roundOver && cardsDrawn && !doubleDownUsed && (
-                <Button variant="contained" color="primary" onClick={doubleDown}>
-                  Double Down
-                </Button>
-              )}
+							{!roundOver && cardsDrawn && !doubleDownUsed && (
+								<Button
+									variant='contained'
+									color='primary'
+									onClick={doubleDown}
+								>
+									Double Down
+								</Button>
+							)}
 
 							<div className='round-result-box '>
 								<Typography variant='body1' className='results-label'>
@@ -471,8 +466,9 @@ server.loadAccount(publicKey)
 						<li>
 							If the sum of the dice rolls equals the combined value of the two
 							drawn cards, you{" "}
-							<span className='fw-bold bg-warning'>Win 5x</span> your bet.Multiplier
-							goes up by <span className='fw-bold bg-warning'>2x</span>
+							<span className='fw-bold bg-warning'>Win 5x</span> your
+							bet.Multiplier goes up by{" "}
+							<span className='fw-bold bg-warning'>2x</span>
 						</li>
 						<li>
 							Draw <span className='jackpot-card'> &#127169; &#127153;</span>{" "}
