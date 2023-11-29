@@ -2,6 +2,7 @@ import React, { useState } from "react";
 import Button from "react-bootstrap/Button";
 import Form from "react-bootstrap/Form";
 import Container from "react-bootstrap/Container";
+import NavBar from "./NavBar";
 
 function Registration() {
 	const [formData, setFormData] = useState({
@@ -10,6 +11,8 @@ function Registration() {
 		password: "",
 		confirmPassword: "",
 	});
+
+	const [registrationError, setRegistrationError] = useState(null); // Add state to track registration errors
 
 	const handleChange = (e) => {
 		const { name, value } = e.target;
@@ -38,13 +41,17 @@ function Registration() {
 			if (response.ok) {
 				// Registration was successful
 				alert("Registration successful!"); // You can show a success message to the user
+				setRegistrationError(null); // Clear any previous registration errors
 			} else {
 				// Registration failed
-				alert("Registration failed. Please try again.");
+				const errorData = await response.json();
+				setRegistrationError(
+					errorData.message || "Registration failed. Please try again."
+				);
 			}
 		} catch (error) {
 			console.error("Error:", error);
-			alert("An error occurred. Please try again later.");
+			setRegistrationError("An error occurred. Please try again later.");
 		}
 
 		// Reset the form fields after submission
@@ -58,6 +65,7 @@ function Registration() {
 
 	return (
 		<Container>
+			<NavBar />
 			<Form
 				onSubmit={handleSubmit}
 				className='mt-5'
@@ -68,6 +76,13 @@ function Registration() {
 				}}
 			>
 				<h2 className='mb-4'>Register</h2>
+
+				{registrationError && (
+					<div className='alert alert-danger' role='alert'>
+						{registrationError}
+					</div>
+				)}
+
 				<Form.Group controlId='formEmail'>
 					<Form.Label>Email address</Form.Label>
 					<Form.Control
