@@ -1,60 +1,138 @@
-// RegistrationForm.js
-import React, { useState } from 'react';
+import React, { useState } from "react";
+import Button from "react-bootstrap/Button";
+import Form from "react-bootstrap/Form";
+import Container from "react-bootstrap/Container";
 
-function RegistrationForm() {
-  const [formData, setFormData] = useState({
-    username: '',
-    email: '',
-    password: '',
-  });
+function Registration() {
+	const [formData, setFormData] = useState({
+		email: "",
+		username: "",
+		password: "",
+		confirmPassword: "",
+	});
 
-  const handleChange = (e) => {
-    const { name, value } = e.target;
-    setFormData({ ...formData, [name]: value });
-  };
+	const handleChange = (e) => {
+		const { name, value } = e.target;
+		setFormData({ ...formData, [name]: value });
+	};
 
-  const handleSubmit = (e) => {
-    e.preventDefault();
-    // Add logic here to send registration data to your server
-  };
-  
+	const handleSubmit = async (e) => {
+		e.preventDefault();
 
-  return (
-    <div>
-      <h2>Registration</h2>
-      <form onSubmit={handleSubmit}>
-        <div>
-          <label>Username:</label>
-          <input
-            type="text"
-            name="username"
-            value={formData.username}
-            onChange={handleChange}
-          />
-        </div>
-        <div>
-          <label>Email:</label>
-          <input
-            type="email"
-            name="email"
-            value={formData.email}
-            onChange={handleChange}
-          />
-        </div>
-        <div>
-          <label>Password:</label>
-          <input
-            type="password"
-            name="password"
-            value={formData.password}
-            onChange={handleChange}
-          />
-        </div>
-        <button type="submit">Register</button>
-      </form>
-    </div>
-  );
+		// Perform form validation
+		if (formData.password !== formData.confirmPassword) {
+			alert("Passwords do not match.");
+			return;
+		}
+
+		try {
+			// Send formData to your server for registration
+			const response = await fetch("http://localhost:3001/registration", {
+				method: "POST",
+				headers: {
+					"Content-Type": "application/json",
+				},
+				body: JSON.stringify(formData),
+			});
+
+			if (response.ok) {
+				// Registration was successful
+				alert("Registration successful!"); // You can show a success message to the user
+			} else {
+				// Registration failed
+				alert("Registration failed. Please try again.");
+			}
+		} catch (error) {
+			console.error("Error:", error);
+			alert("An error occurred. Please try again later.");
+		}
+
+		// Reset the form fields after submission
+		setFormData({
+			email: "",
+			username: "",
+			password: "",
+			confirmPassword: "",
+		});
+	};
+
+	return (
+		<Container>
+			<Form
+				onSubmit={handleSubmit}
+				className='mt-5'
+				style={{
+					backgroundColor: "#C7E7FF",
+					padding: "20px",
+					borderRadius: "10px",
+				}}
+			>
+				<h2 className='mb-4'>Register</h2>
+				<Form.Group controlId='formEmail'>
+					<Form.Label>Email address</Form.Label>
+					<Form.Control
+						type='email'
+						placeholder='Enter email'
+						name='email'
+						value={formData.email}
+						onChange={handleChange}
+						required
+					/>
+					<Form.Text className='text-muted'>
+						We'll never share your email with anyone else.
+					</Form.Text>
+				</Form.Group>
+
+				<Form.Group controlId='formUserName'>
+					<Form.Label>User Name</Form.Label>
+					<Form.Control
+						type='text'
+						placeholder='Enter username'
+						name='username'
+						value={formData.username}
+						onChange={handleChange}
+						required
+					/>
+				</Form.Group>
+
+				<Form.Group controlId='formPassword'>
+					<Form.Label>Password</Form.Label>
+					<Form.Control
+						type='password'
+						placeholder='Password'
+						name='password'
+						value={formData.password}
+						onChange={handleChange}
+						required
+					/>
+				</Form.Group>
+
+				<Form.Group controlId='formConfirmPassword'>
+					<Form.Label>Confirm Password</Form.Label>
+					<Form.Control
+						type='password'
+						placeholder='Confirm password'
+						name='confirmPassword'
+						value={formData.confirmPassword}
+						onChange={handleChange}
+						required
+					/>
+				</Form.Group>
+
+				<Form.Group controlId='formBasicCheckbox'>
+					<Form.Check
+						type='checkbox'
+						label='I agree to the terms and conditions'
+						required
+					/>
+				</Form.Group>
+
+				<Button variant='success' type='submit'>
+					Register
+				</Button>
+			</Form>
+		</Container>
+	);
 }
 
-
-export default RegistrationForm;
+export default Registration;
