@@ -43,14 +43,12 @@ function Home() {
                     <Navbar.Toggle aria-controls='basic-navbar-nav' />
                     <Navbar.Collapse id='basic-navbar-nav'>
                         <Nav className='ml-auto'>
-                            <Nav.Link href='#' style={{ marginRight: '10px' }}>
+                            <Nav.Link href='/registration' style={{ marginRight: '10px' }}>
                                 Login/Register
                             </Nav.Link>
                             <Nav.Link href='#'>Deposit</Nav.Link>
                             <Nav.Link href='/game2'>In-Between</Nav.Link>
-                            <Link to='/registration' style={{ marginRight: '10px' }}>
-                                Register
-                            </Link>
+                            
 
                         </Nav>
                     </Navbar.Collapse>
