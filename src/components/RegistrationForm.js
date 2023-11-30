@@ -12,7 +12,8 @@ function Registration() {
 		confirmPassword: "",
 	});
 
-	const [registrationError, setRegistrationError] = useState(null); // Add state to track registration errors
+	const [registrationError, setRegistrationError] = useState(null);
+	const [isRegistering, setIsRegistering] = useState(true); // State to track registration or login
 
 	const handleChange = (e) => {
 		const { name, value } = e.target;
@@ -29,8 +30,9 @@ function Registration() {
 		}
 
 		try {
-			// Send formData to your server for registration
-			const response = await fetch("http://localhost:3001/registration", {
+			// Send formData to your server for registration or login
+			const endpoint = isRegistering ? "/registration" : "/login";
+			const response = await fetch(`http://localhost:3001${endpoint}`, {
 				method: "POST",
 				headers: {
 					"Content-Type": "application/json",
@@ -39,14 +41,17 @@ function Registration() {
 			});
 
 			if (response.ok) {
-				// Registration was successful
-				alert("Registration successful!"); // You can show a success message to the user
-				setRegistrationError(null); // Clear any previous registration errors
+				// Registration or login was successful
+				alert(`${isRegistering ? "Registration" : "Login"} successful!`);
+				setRegistrationError(null);
 			} else {
-				// Registration failed
+				// Registration or login failed
 				const errorData = await response.json();
 				setRegistrationError(
-					errorData.message || "Registration failed. Please try again."
+					errorData.message ||
+						`${
+							isRegistering ? "Registration" : "Login"
+						} failed. Please try again.`
 				);
 			}
 		} catch (error) {
@@ -56,11 +61,16 @@ function Registration() {
 
 		// Reset the form fields after submission
 		setFormData({
-			email: "",
 			username: "",
-			password: "",
+
 			confirmPassword: "",
 		});
+	};
+
+	// Toggle between registration and login
+	const toggleForm = () => {
+		setIsRegistering(!isRegistering);
+		setRegistrationError(null); // Clear any previous errors
 	};
 
 	return (
@@ -75,7 +85,21 @@ function Registration() {
 					borderRadius: "10px",
 				}}
 			>
-				<h2 className='mb-4'>Register</h2>
+				<h2 className='mb-4'>
+					{isRegistering ? "Register" : "Login"}{" "}
+					<small>
+						<Button
+							variant='link'
+							onClick={toggleForm}
+							className='p-0 m-0'
+							style={{ fontSize: "1rem" }}
+						>
+							{isRegistering
+								? "Already have an account?"
+								: "Dont have an account?"}
+						</Button>
+					</small>
+				</h2>
 
 				{registrationError && (
 					<div className='alert alert-danger' role='alert'>
@@ -122,17 +146,19 @@ function Registration() {
 					/>
 				</Form.Group>
 
-				<Form.Group controlId='formConfirmPassword'>
-					<Form.Label>Confirm Password</Form.Label>
-					<Form.Control
-						type='password'
-						placeholder='Confirm password'
-						name='confirmPassword'
-						value={formData.confirmPassword}
-						onChange={handleChange}
-						required
-					/>
-				</Form.Group>
+				{isRegistering && ( // Render confirmPassword field for registration only
+					<Form.Group controlId='formConfirmPassword'>
+						<Form.Label>Confirm Password</Form.Label>
+						<Form.Control
+							type='password'
+							placeholder='Confirm password'
+							name='confirmPassword'
+							value={formData.confirmPassword}
+							onChange={handleChange}
+							required
+						/>
+					</Form.Group>
+				)}
 
 				<Form.Group controlId='formBasicCheckbox'>
 					<Form.Check
@@ -143,7 +169,7 @@ function Registration() {
 				</Form.Group>
 
 				<Button variant='success' type='submit'>
-					Register
+					{isRegistering ? "Register" : "Login"}
 				</Button>
 			</Form>
 		</Container>

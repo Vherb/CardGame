@@ -56,12 +56,10 @@ app.post("/registration", async (req, res) => {
 		} else {
 			// If a user with the same username already exists, return an error
 			if (results.length > 0) {
-				res
-					.status(400)
-					.json({
-						message:
-							"Username already exists. Please choose a different username.",
-					});
+				res.status(400).json({
+					message:
+						"Username already exists. Please choose a different username.",
+				});
 			} else {
 				// Hash the password and insert user data into the database
 				const hashedPassword = await bcrypt.hash(password, 10); // Hash the password (adjust salt rounds as needed)
@@ -84,15 +82,54 @@ app.post("/registration", async (req, res) => {
 								res.status(200).json({ message: "Registration successful" });
 							} else {
 								console.error("Registration failed due to database issue");
-								res
-									.status(500)
-									.json({
-										message: "Registration failed due to a database issue",
-									});
+								res.status(500).json({
+									message: "Registration failed due to a database issue",
+								});
 							}
 						}
 					}
 				);
+			}
+		}
+	});
+});
+
+app.post("/login", async (req, res) => {
+	const { username, password } = req.body;
+
+	console.log("Received a login request:", {
+		username,
+		password,
+	});
+
+	// Retrieve user data from the database based on the username
+	const getUserQuery = "SELECT * FROM users WHERE username = ?";
+	db.query(getUserQuery, [username], async (error, results) => {
+		if (error) {
+			console.error("User retrieval failed:", error);
+			res.status(500).json({ message: "Login failed" });
+		} else {
+			// If a user with the given username exists
+			if (results.length > 0) {
+				const user = results[0]; // Assuming username is unique
+				const hashedPassword = user.password; // Retrieve the hashed password from the database
+
+				// Compare the provided password with the hashed password in the database
+				const passwordMatch = await bcrypt.compare(password, hashedPassword);
+
+				if (passwordMatch) {
+					// Passwords match, login successful
+					console.log("Login successful");
+					res.status(200).json({ message: "Login successful" });
+				} else {
+					// Passwords do not match, return an error
+					console.log("Incorrect password");
+					res.status(400).json({ message: "Incorrect password" });
+				}
+			} else {
+				// User with the given username does not exist
+				console.log("User not found");
+				res.status(404).json({ message: "User not found" });
 			}
 		}
 	});
