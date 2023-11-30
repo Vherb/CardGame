@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from "react";
-import MyCard from "./MyCard";
-import Dice from "./Dice";
-import "./App.css";
+import NavBar from "./../../NavBar";
+import MyCard from "./../../MyCard";
+import Dice from "./../../Dice";
+import "./../../App.css";
 import "./Game.css";
 import StellarSdk from "stellar-sdk";
 
@@ -46,18 +47,6 @@ const DiceItem = styled("div")(({ theme }) => ({
 const CustomPaper = styled(Paper)(({ theme }) => ({
 	padding: theme.spacing(3),
 	marginBottom: theme.spacing(2),
-}));
-
-const JackpotMessage = styled(Paper)(({ theme }) => ({
-	padding: theme.spacing(2),
-	background: "#4CAF50", // Background color for the jackpot message
-	color: "#fff", // Text color for the jackpot message
-	textAlign: "center",
-	fontWeight: "bold",
-	fontSize: "24px",
-	marginBottom: theme.spacing(2),
-	border: "2px solid #388E3C", // Border color for the jackpot message
-	borderRadius: "10px", // Border radius for the jackpot message
 }));
 
 function Game() {
@@ -135,8 +124,6 @@ function Game() {
 	const [doubledDown, setDoubledDown] = useState(false);
 	const [cardsDrawn, setCardsDrawn] = useState(false);
 	const [doubleDownUsed, setDoubleDownUsed] = useState(false);
-
-
 
 	useEffect(() => {
 		setCoins(100);
@@ -327,6 +314,7 @@ function Game() {
 
 	return (
 		<ThemeProvider theme={theme}>
+			<NavBar />
 			<Container className='mt-5' maxWidth='lg'>
 				<Grid container spacing={3}>
 					<Grid item xs={12}>
