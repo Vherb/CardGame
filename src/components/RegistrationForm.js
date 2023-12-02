@@ -11,17 +11,8 @@ function Registration() {
     password: "",
   });
 
-<<<<<<< HEAD
-	const [registrationError, setRegistrationError] = useState(null); // Add state to track registration errors
-
-	const handleChange = (e) => {
-		const { name, value } = e.target;
-		setFormData({ ...formData, [name]: value });
-	};
-=======
   const [registrationError, setRegistrationError] = useState(null);
   const [isRegistering, setIsRegistering] = useState(true);
->>>>>>> origin/main
 
   const handleChange = (e) => {
     const { name, value } = e.target;
@@ -44,23 +35,6 @@ function Registration() {
         }
       );
 
-<<<<<<< HEAD
-			if (response.ok) {
-				// Registration was successful
-				alert("Registration successful!"); // You can show a success message to the user
-				setRegistrationError(null); // Clear any previous registration errors
-			} else {
-				// Registration failed
-				const errorData = await response.json();
-				setRegistrationError(
-					errorData.message || "Registration failed. Please try again."
-				);
-			}
-		} catch (error) {
-			console.error("Error:", error);
-			setRegistrationError("An error occurred. Please try again later.");
-		}
-=======
       if (response.ok) {
         // Registration or login was successful
         alert(`${isRegistering ? "Registration" : "Login"} successful!`);
@@ -78,7 +52,6 @@ function Registration() {
       console.error("Error:", error);
       setRegistrationError("An error occurred. Please try again later.");
     }
->>>>>>> origin/main
 
     // Reset the form fields after submission
     setFormData({
@@ -87,47 +60,10 @@ function Registration() {
     });
   };
 
-<<<<<<< HEAD
-	return (
-		<Container>
-			<NavBar />
-			<Form
-				onSubmit={handleSubmit}
-				className='mt-5'
-				style={{
-					backgroundColor: "#C7E7FF",
-					padding: "20px",
-					borderRadius: "10px",
-				}}
-			>
-				<h2 className='mb-4'>Register</h2>
-
-				{registrationError && (
-					<div className='alert alert-danger' role='alert'>
-						{registrationError}
-					</div>
-				)}
-
-				<Form.Group controlId='formEmail'>
-					<Form.Label>Email address</Form.Label>
-					<Form.Control
-						type='email'
-						placeholder='Enter email'
-						name='email'
-						value={formData.email}
-						onChange={handleChange}
-						required
-					/>
-					<Form.Text className='text-muted'>
-						We'll never share your email with anyone else.
-					</Form.Text>
-				</Form.Group>
-=======
   const toggleForm = () => {
     setIsRegistering(!isRegistering);
     setRegistrationError(null);
   };
->>>>>>> origin/main
 
   return (
     <Container>
