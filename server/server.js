@@ -56,19 +56,10 @@ app.post("/registration", async (req, res) => {
 		} else {
 			// If a user with the same username already exists, return an error
 			if (results.length > 0) {
-<<<<<<< HEAD
-				res
-					.status(400)
-					.json({
-						message:
-							"Username already exists. Please choose a different username.",
-					});
-=======
 				res.status(400).json({
 					message:
 						"Username already exists. Please choose a different username.",
 				});
->>>>>>> origin/main
 			} else {
 				// Hash the password and insert user data into the database
 				const hashedPassword = await bcrypt.hash(password, 10); // Hash the password (adjust salt rounds as needed)
@@ -91,17 +82,9 @@ app.post("/registration", async (req, res) => {
 								res.status(200).json({ message: "Registration successful" });
 							} else {
 								console.error("Registration failed due to database issue");
-<<<<<<< HEAD
-								res
-									.status(500)
-									.json({
-										message: "Registration failed due to a database issue",
-									});
-=======
 								res.status(500).json({
 									message: "Registration failed due to a database issue",
 								});
->>>>>>> origin/main
 							}
 						}
 					}
@@ -109,8 +92,6 @@ app.post("/registration", async (req, res) => {
 			}
 		}
 	});
-<<<<<<< HEAD
-=======
 });
 
 app.post("/login", async (req, res) => {
@@ -152,7 +133,6 @@ app.post("/login", async (req, res) => {
 			}
 		}
 	});
->>>>>>> origin/main
 });
 
 const port = 3001; // Choose an available port
