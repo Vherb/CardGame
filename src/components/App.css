@@ -1,28 +1,36 @@
+<<<<<<< HEAD
 
 
+=======
+>>>>>>> origin/main
 /* App.css */
 
 body {
-  font-family: Arial, sans-serif;
-  background-color: #ABFCF6;
-  margin: 0;
-  padding: 0;
+	font-family: Arial, sans-serif;
+	background-color: #abfcf6;
+	margin: 0;
+	padding: 0;
 }
 
 .App {
-  text-align: center;
-  padding: 20px;
+	text-align: center;
+	padding: 20px;
 }
 
 h1 {
-  color: #333;
-  font-size: 36px;
-  margin-bottom: 20px;
+	color: #333;
+	font-size: 36px;
+	margin-bottom: 20px;
 }
 p {
+<<<<<<< HEAD
  font-size: 15%;
 }
  
 
+=======
+	font-size: 15%;
+}
+>>>>>>> origin/main
 
 /* card animations */
