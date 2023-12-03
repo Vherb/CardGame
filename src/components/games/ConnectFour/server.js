@@ -13,7 +13,7 @@ const PORT = process.env.PORT || 3001;
 const games = new Map();
 let waitingPlayers = [];
 
-const allowedOrigins = ['http://localhost:3000'];
+const allowedOrigins = ['http://192.168.50.123:3000'];
 const corsOptions = {
   origin: (origin, callback) => {
     if (allowedOrigins.includes(origin) || !origin) {
