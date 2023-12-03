@@ -6,41 +6,39 @@ class ConnectFourGame {
       Array.from({ length: columns }, () => null)
     );
     this.currentPlayer = 'Player 1'; // Start with Player 1
-    this.otherPlayer = 'Player 2';    // Player 2
     this.winner = null;
     this.gameOver = false;
   }
-
-  // ... Rest of the class methods ...
 
   makeMove(column) {
     if (this.gameOver) {
       return false; // Game is already over
     }
 
-    // Find the lowest available row in the selected column
-    let row = this.rows - 1;
-    while (row >= 0 && this.board[row][column] !== null) {
-      row--;
-    }
-
-    if (row < 0) {
+    const row = this.findEmptyRow(column);
+    if (row === -1) {
       return false; // Column is full
     }
 
-    // Place the player's token in the selected cell
     this.board[row][column] = this.currentPlayer;
 
-    // Check for a win
     if (this.checkWin(row, column)) {
       this.winner = this.currentPlayer;
       this.gameOver = true;
     } else {
-      // Switch to the next player
       this.currentPlayer = this.currentPlayer === 'Player 1' ? 'Player 2' : 'Player 1';
     }
 
     return true; // Move was successful
+  }
+
+  findEmptyRow(column) {
+    for (let row = this.rows - 1; row >= 0; row--) {
+      if (this.board[row][column] === null) {
+        return row;
+      }
+    }
+    return -1; // Column is full
   }
 
   checkWin(row, col) {
@@ -62,7 +60,7 @@ class ConnectFourGame {
           r >= 0 &&
           r < this.rows &&
           c >= 0 &&
-          c < this.columns && // Corrected line
+          c < this.columns &&
           this.board[r][c] === this.currentPlayer
         ) {
           count++;

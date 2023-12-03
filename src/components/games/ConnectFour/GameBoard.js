@@ -12,8 +12,8 @@ const GameBoard = () => {
   const [player1Wins, setPlayer1Wins] = useState(localStorage.getItem('player1Wins') || 0);
   const [player2Wins, setPlayer2Wins] = useState(localStorage.getItem('player2Wins') || 0);
   const [isGameStarted, setIsGameStarted] = useState(false);
+  const [playerRole, setPlayerRole] = useState(null); // Add playerRole state
 
-  
   const initializeWebSocket = () => {
     const newWs = new WebSocket('ws://192.168.50.123:3001');
     newWs.onopen = () => {
@@ -29,6 +29,7 @@ const GameBoard = () => {
       } else if (data.type === 'startGame') {
         setIsGameStarted(true);
         setCurrentPlayer(data.currentPlayer);
+        setPlayerRole(data.currentPlayer); // Set the player's role
       }
     };
 
@@ -38,9 +39,8 @@ const GameBoard = () => {
       newWs.close();
     };
   };
-   // Modify and place the useEffect here
-   useEffect(() => {
-    // Call the initializeWebSocket function when the component mounts
+
+  useEffect(() => {
     initializeWebSocket();
   }, []);
 
@@ -99,52 +99,76 @@ const GameBoard = () => {
   };
 
   const handleCellClick = (row, col) => {
-    // Check if the selected cell is already occupied or if there's a winner
     if (board[row][col] !== null || winner || !isGameStarted) {
       return;
     }
 
-    // Find the lowest available row in the selected column
-    let newRow = ROWS - 1;
-    while (newRow >= 0 && board[newRow][col] !== null) {
-      newRow--;
-    }
+    // Ensure that the player can only place tokens of their color
+    if ((playerRole === 'Player 1' && currentPlayer === 'Player 1') || (playerRole === 'Player 2' && currentPlayer === 'Player 2')) {
+      // Find the lowest available row in the selected column
+      let newRow = ROWS - 1;
+      while (newRow >= 0 && board[newRow][col] !== null) {
+        newRow--;
+      }
 
-    // Update the board with the current player's token in the selected cell
-    const newBoard = board.map((row) => [...row]);
-    newBoard[newRow][col] = currentPlayer;
-    setBoard(newBoard);
+      // Update the board with the current player's token in the selected cell
+      const newBoard = board.map((row) => [...row]);
+      newBoard[newRow][col] = currentPlayer;
+      setBoard(newBoard);
 
-    // Check for a winner
-    if (checkForWinner(newBoard, newRow, col)) {
-      setWinner(currentPlayer);
+      // Check for a winner
+      if (checkForWinner(newBoard, newRow, col)) {
+        setWinner(currentPlayer);
 
-      // Update the win count in local storage
-      if (currentPlayer === 'Player 1') {
-        const newWins = parseInt(player1Wins) + 1;
-        setPlayer1Wins(newWins);
-        localStorage.setItem('player1Wins', newWins);
-      } else {
-        const newWins = parseInt(player2Wins) + 1;
-        setPlayer2Wins(newWins);
-        localStorage.setItem('player2Wins', newWins);
+        // Update the win count in local storage
+        if (currentPlayer === 'Player 1') {
+          const newWins = parseInt(player1Wins) + 1;
+          setPlayer1Wins(newWins);
+          localStorage.setItem('player1Wins', newWins);
+        } else {
+          const newWins = parseInt(player2Wins) + 1;
+          setPlayer2Wins(newWins);
+          localStorage.setItem('player2Wins', newWins);
+        }
+      }
+
+      setCurrentPlayer(currentPlayer === 'Player 1' ? 'Player 2' : 'Player 1');
+
+      // Send move data to the server using WebSocket
+      const moveData = {
+        type: 'makeMove',
+        col,
+      };
+
+      if (ws) {
+        ws.send(JSON.stringify(moveData));
       }
     }
+  };
 
-    // Switch to the next player
-    setCurrentPlayer(currentPlayer === 'Player 1' ? 'Player 2' : 'Player 1');
-
-    // Send move data to the server using WebSocket
-    const moveData = {
-      type: 'makeMove',
-      row,
-      col,
-      currentPlayer,
-    };
-
-    if (ws) {
-      ws.send(JSON.stringify(moveData));
-    }
+  const renderBoard = () => {
+    return (
+      <div className="board">
+        {Array.from({ length: COLUMNS }).map((_, colIndex) => (
+          <div key={colIndex} className="column">
+            {Array.from({ length: ROWS }).map((_, rowIndex) => (
+              <div
+                key={`${colIndex}-${rowIndex}`}
+                className={`cell ${board[rowIndex][colIndex] ? `Player-${board[rowIndex][colIndex]}` : ''}`}
+                onClick={() => handleCellClick(rowIndex, colIndex)}
+              >
+                {board[rowIndex][colIndex] === 'Player 1' && (
+                  <div className="circle red-circle"></div>
+                )}
+                {board[rowIndex][colIndex] === 'Player 2' && (
+                  <div className="circle blue-circle"></div>
+                )}
+              </div>
+            ))}
+          </div>
+        ))}
+      </div>
+    );
   };
 
   const handleResetGame = () => {
@@ -179,36 +203,10 @@ const GameBoard = () => {
     };
 
     // Initialize the WebSocket connection when joining the game
-  
 
     if (ws) {
       ws.send(JSON.stringify(joinData));
     }
-  };
-
-  const renderBoard = () => {
-    return (
-      <div className="board">
-        {Array.from({ length: COLUMNS }).map((_, colIndex) => (
-          <div key={colIndex} className="column">
-            {Array.from({ length: ROWS }).map((_, rowIndex) => (
-              <div
-                key={`${colIndex}-${rowIndex}`}
-                className={`cell ${board[rowIndex][colIndex] ? `Player-${board[rowIndex][colIndex]}` : ''}`}
-                onClick={() => handleCellClick(rowIndex, colIndex)}
-              >
-                {board[rowIndex][colIndex] === 'Player 1' && (
-                  <div className="circle red-circle"></div>
-                )}
-                {board[rowIndex][colIndex] === 'Player 2' && (
-                  <div className="circle blue-circle"></div>
-                )}
-              </div>
-            ))}
-          </div>
-        ))}
-      </div>
-    );
   };
 
   return (

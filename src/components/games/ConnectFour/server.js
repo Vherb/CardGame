@@ -13,7 +13,7 @@ const PORT = process.env.PORT || 3001;
 const games = new Map();
 let waitingPlayers = [];
 
-const allowedOrigins = ['http://192.168.50.123:3000'];
+const allowedOrigins = ['http://192.168.50.123:3000']; // Update with your allowed origins
 const corsOptions = {
   origin: (origin, callback) => {
     if (allowedOrigins.includes(origin) || !origin) {
@@ -63,6 +63,7 @@ wss.on('connection', (ws) => {
           if (game && game.players.includes(ws) && game.makeMove(data.col)) {
             game.currentPlayer = game.currentPlayer === 'Player 1' ? 'Player 2' : 'Player 1';
 
+            // Send game update to all players in the game
             game.players.forEach((player, index) => {
               player.send(
                 JSON.stringify({
