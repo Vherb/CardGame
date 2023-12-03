@@ -4,7 +4,7 @@ import MyCard from "./../../MyCard";
 import Dice from "./../../Dice";
 import "./../../App.css";
 import "./Game.css";
-import StellarSdk from "stellar-sdk";
+
 
 import {
 	Button,
@@ -16,6 +16,9 @@ import {
 	createTheme,
 	styled,
 } from "@mui/material";
+
+
+
 
 const CenteredText = styled("div")({
 	textAlign: "center",
@@ -124,30 +127,6 @@ function Game() {
 	const [doubledDown, setDoubledDown] = useState(false);
 	const [cardsDrawn, setCardsDrawn] = useState(false);
 	const [doubleDownUsed, setDoubleDownUsed] = useState(false);
-
-	useEffect(() => {
-		setCoins(100);
-	}, []);
-
-	useEffect(() => {
-		// Replace 'YOUR_PUBLIC_KEY' with the actual public key of the account you want to query
-		const publicKey =
-			"GDD3QDSS2ZTJNDFF6ZK7D4XNMPH6W7Z3RW5CZPIV56ZW522MHPROFR27";
-
-		// Create a new instance of the Stellar Server
-		const server = new StellarSdk.Server("https://horizon-testnet.stellar.org");
-
-		console.log("Public Key:", publicKey);
-
-		server
-			.loadAccount(publicKey)
-			.then((loadedAccount) => {
-				console.log("Account loaded successfully:", loadedAccount);
-			})
-			.catch((error) => {
-				console.error("Error loading account:", error);
-			});
-	}, []); // The empty dependency array ensures this effect runs only once when the component mounts
 
 	const toggleDescription = () => {
 		setDescriptionCollapsed(!descriptionCollapsed);
