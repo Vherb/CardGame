@@ -15,7 +15,7 @@ const GameBoard = () => {
 
   
   const initializeWebSocket = () => {
-    const newWs = new WebSocket('ws://localhost:3001');
+    const newWs = new WebSocket('ws://192.168.50.123:3001');
     newWs.onopen = () => {
       console.log('WebSocket connection established.');
     };
