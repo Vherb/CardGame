@@ -15,6 +15,7 @@ function NavBar() {
 						<Nav.Link href='#'>Deposit</Nav.Link>
 						<NavDropdown title='Games' id='basic-nav-dropdown'>
 							<NavDropdown.Item href='/Game2'>In-Between</NavDropdown.Item>
+							<NavDropdown.Item href='/connect-four'>Connect Four</NavDropdown.Item>
 							<NavDropdown.Item href='/'>Roll of Cards</NavDropdown.Item>
 						</NavDropdown>
 					</Nav>
