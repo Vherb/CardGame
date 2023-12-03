@@ -6,13 +6,15 @@ const COLUMNS = 7;
 
 const GameBoard = () => {
   const [board, setBoard] = useState(Array(ROWS).fill(Array(COLUMNS).fill(null)));
-  const [currentPlayer, setCurrentPlayer] = useState('Player 1');
+  const [currentPlayer, setCurrentPlayer] = useState('Waiting for Player 2');
   const [ws, setWs] = useState(null);
   const [winner, setWinner] = useState(null);
   const [player1Wins, setPlayer1Wins] = useState(localStorage.getItem('player1Wins') || 0);
   const [player2Wins, setPlayer2Wins] = useState(localStorage.getItem('player2Wins') || 0);
+  const [isGameStarted, setIsGameStarted] = useState(false);
 
-  useEffect(() => {
+  
+  const initializeWebSocket = () => {
     const newWs = new WebSocket('ws://localhost:3001');
     newWs.onopen = () => {
       console.log('WebSocket connection established.');
@@ -24,6 +26,9 @@ const GameBoard = () => {
         setBoard(data.board);
         setCurrentPlayer(data.currentPlayer);
         setWinner(data.winner);
+      } else if (data.type === 'startGame') {
+        setIsGameStarted(true);
+        setCurrentPlayer(data.currentPlayer);
       }
     };
 
@@ -32,6 +37,11 @@ const GameBoard = () => {
     return () => {
       newWs.close();
     };
+  };
+   // Modify and place the useEffect here
+   useEffect(() => {
+    // Call the initializeWebSocket function when the component mounts
+    initializeWebSocket();
   }, []);
 
   const checkForWinner = (board, row, col) => {
@@ -90,7 +100,7 @@ const GameBoard = () => {
 
   const handleCellClick = (row, col) => {
     // Check if the selected cell is already occupied or if there's a winner
-    if (board[row][col] !== null || winner) {
+    if (board[row][col] !== null || winner || !isGameStarted) {
       return;
     }
 
@@ -142,6 +152,7 @@ const GameBoard = () => {
     setBoard(Array(ROWS).fill(Array(COLUMNS).fill(null)));
     setCurrentPlayer('Player 1');
     setWinner(null);
+    setIsGameStarted(false);
 
     // Send a reset game message to the server using WebSocket
     const resetData = {
@@ -150,6 +161,28 @@ const GameBoard = () => {
 
     if (ws) {
       ws.send(JSON.stringify(resetData));
+    }
+  };
+
+  const handleResetWinCount = () => {
+    // Reset the win counts and clear local storage
+    setPlayer1Wins(0);
+    setPlayer2Wins(0);
+    localStorage.removeItem('player1Wins');
+    localStorage.removeItem('player2Wins');
+  };
+
+  const handleJoinGame = () => {
+    console.log('Game joined.'); // Log that the game has been joined
+    const joinData = {
+      type: 'joinGame',
+    };
+
+    // Initialize the WebSocket connection when joining the game
+  
+
+    if (ws) {
+      ws.send(JSON.stringify(joinData));
     }
   };
 
@@ -193,8 +226,19 @@ const GameBoard = () => {
           <h4 className="wins">Player 1 Wins: {player1Wins}</h4>
           <h4 className="wins">Player 2 Wins: {player2Wins}</h4>
         </div>
-        {renderBoard()}
-        <button className="reset-button" onClick={handleResetGame}>Reset Game</button>
+        {isGameStarted ? (
+          renderBoard()
+        ) : (
+          <button className="join-game-button" onClick={handleJoinGame}>
+            Join Game
+          </button>
+        )}
+        <button className="reset-button" onClick={handleResetGame}>
+          Reset Game
+        </button>
+        <button className="reset-win-button" onClick={handleResetWinCount}>
+          Reset Win Count
+        </button>
       </div>
     </div>
   );
