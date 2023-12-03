@@ -6,9 +6,12 @@ class ConnectFourGame {
       Array.from({ length: columns }, () => null)
     );
     this.currentPlayer = 'Player 1'; // Start with Player 1
+    this.otherPlayer = 'Player 2';    // Player 2
     this.winner = null;
     this.gameOver = false;
   }
+
+  // ... Rest of the class methods ...
 
   makeMove(column) {
     if (this.gameOver) {
@@ -55,12 +58,11 @@ class ConnectFourGame {
       for (let i = 1; i <= 3; i++) {
         const r = row + i * dr;
         const c = col + i * dc;
-
         if (
           r >= 0 &&
           r < this.rows &&
           c >= 0 &&
-          c < this.columns &&
+          c < this.columns && // Corrected line
           this.board[r][c] === this.currentPlayer
         ) {
           count++;
