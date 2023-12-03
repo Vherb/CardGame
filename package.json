@@ -18,6 +18,7 @@
     "express": "^4.18.2",
     "firebase": "^10.6.0",
     "firebaseui": "^6.1.0",
+    "http": "^0.0.1-security",
     "https-browserify": "^1.0.0",
     "mysql": "^2.18.1",
     "mysql2": "^3.6.5",
@@ -33,6 +34,7 @@
     "stream-http": "^3.2.0",
     "url": "^0.11.3",
     "util": "^0.12.5",
+    "uuid": "^9.0.1",
     "web-vitals": "^2.1.4",
     "ws": "^8.14.2"
   },

@@ -1,8 +1,8 @@
 const express = require('express');
 const http = require('http');
 const WebSocket = require('ws');
-const cors = require('cors'); // Import the cors middleware
-const ConnectFourGame = require('./ConnectFourGame'); // Import the ConnectFourGame class
+const cors = require('cors');
+const ConnectFourGame = require('./ConnectFourGame');
 
 const app = express();
 const server = http.createServer(app);
@@ -11,9 +11,9 @@ const wss = new WebSocket.Server({ server });
 const PORT = process.env.PORT || 3001;
 
 const games = new Map();
+let waitingPlayers = [];
 
-// Configure CORS for WebSocket connections
-const allowedOrigins = ['http://localhost:3000']; // Add your React app's origin
+const allowedOrigins = ['http://localhost:3000'];
 const corsOptions = {
   origin: (origin, callback) => {
     if (allowedOrigins.includes(origin) || !origin) {
@@ -35,38 +35,50 @@ wss.on('connection', (ws) => {
 
       switch (data.type) {
         case 'joinGame':
-  if (!game || game.gameOver) {
-    game = new ConnectFourGame(6, 7); // Create a new game instance
-    game.players = [ws];
-    games.set(ws, game);
-    ws.send(JSON.stringify({ type: 'startGame', currentPlayer: game.currentPlayer }));
-  } else if (game.players.length === 1) {
-    game.players.push(ws);
-    ws.send(JSON.stringify({ type: 'startGame', currentPlayer: game.currentPlayer }));
-  } else {
-    ws.close();
-  }
-  break;
+          if (!game || game.gameOver) {
+            waitingPlayers.push(ws);
 
+            if (waitingPlayers.length >= 2) {
+              // Create a new game when there are enough waiting players
+              game = new ConnectFourGame(6, 7);
+              game.players = [waitingPlayers.shift(), waitingPlayers.shift()];
+
+              game.players.forEach((player, index) => {
+                player.send(
+                  JSON.stringify({
+                    type: 'startGame',
+                    currentPlayer: game.currentPlayer,
+                    playerNumber: index + 1,
+                  })
+                );
+              });
+
+              games.set(game.players[0], game);
+              games.set(game.players[1], game);
+            }
+          }
+          break;
 
         case 'makeMove':
-          if (game.makeMove(data.col)) {
-            // Update currentPlayer in the game instance
+          if (game && game.players.includes(ws) && game.makeMove(data.col)) {
             game.currentPlayer = game.currentPlayer === 'Player 1' ? 'Player 2' : 'Player 1';
 
-            // Send game updates to all players
-            game.players.forEach((player) => {
+            game.players.forEach((player, index) => {
               player.send(
                 JSON.stringify({
                   type: 'gameUpdate',
                   board: game.board,
-                  currentPlayer: game.currentPlayer, // Update current player
+                  currentPlayer: game.currentPlayer,
                   winner: game.winner,
+                  playerNumber: index + 1,
                 })
               );
             });
           }
           break;
+
+        default:
+          console.error('Invalid message type:', data.type);
       }
     } catch (error) {
       console.error('Invalid message format:', error);
@@ -77,8 +89,11 @@ wss.on('connection', (ws) => {
     if (game) {
       game.players = game.players.filter((player) => player !== ws);
       if (game.players.length === 0) {
-        games.delete(ws);
+        games.delete(game.players[0]);
+        games.delete(game.players[1]);
       }
+    } else {
+      waitingPlayers = waitingPlayers.filter((player) => player !== ws);
     }
   });
 });
