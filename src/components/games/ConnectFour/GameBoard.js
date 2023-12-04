@@ -19,7 +19,7 @@ const GameBoard = () => {
     newWs.onopen = () => {
       console.log('WebSocket connection established.');
     };
-
+  
     newWs.onmessage = (event) => {
       const data = JSON.parse(event.data);
       if (data.type === 'gameUpdate') {
@@ -29,16 +29,17 @@ const GameBoard = () => {
       } else if (data.type === 'startGame') {
         setIsGameStarted(true);
         setCurrentPlayer(data.currentPlayer);
-        setPlayerRole(data.currentPlayer); // Set the player's role
+        setPlayerRole(data.playerNumber === 1 ? 'Player 1' : 'Player 2'); // Set the player's role based on playerNumber
       }
     };
-
+  
     setWs(newWs);
-
+  
     return () => {
       newWs.close();
     };
   };
+  
 
   useEffect(() => {
     initializeWebSocket();
@@ -102,49 +103,45 @@ const GameBoard = () => {
     if (board[row][col] !== null || winner || !isGameStarted) {
       return;
     }
-
-    // Ensure that the player can only place tokens of their color
-    if ((playerRole === 'Player 1' && currentPlayer === 'Player 1') || (playerRole === 'Player 2' && currentPlayer === 'Player 2')) {
-      // Find the lowest available row in the selected column
-      let newRow = ROWS - 1;
-      while (newRow >= 0 && board[newRow][col] !== null) {
-        newRow--;
-      }
-
-      // Update the board with the current player's token in the selected cell
-      const newBoard = board.map((row) => [...row]);
-      newBoard[newRow][col] = currentPlayer;
-      setBoard(newBoard);
-
-      // Check for a winner
-      if (checkForWinner(newBoard, newRow, col)) {
-        setWinner(currentPlayer);
-
-        // Update the win count in local storage
-        if (currentPlayer === 'Player 1') {
-          const newWins = parseInt(player1Wins) + 1;
-          setPlayer1Wins(newWins);
-          localStorage.setItem('player1Wins', newWins);
-        } else {
-          const newWins = parseInt(player2Wins) + 1;
-          setPlayer2Wins(newWins);
-          localStorage.setItem('player2Wins', newWins);
-        }
-      }
-
-      setCurrentPlayer(currentPlayer === 'Player 1' ? 'Player 2' : 'Player 1');
-
-      // Send move data to the server using WebSocket
-      const moveData = {
-        type: 'makeMove',
-        col,
-      };
-
-      if (ws) {
-        ws.send(JSON.stringify(moveData));
+  
+    // Find the lowest available row in the selected column
+    let newRow = ROWS - 1;
+    while (newRow >= 0 && board[newRow][col] !== null) {
+      newRow--;
+    }
+  
+    // Update the board with the current player's token in the selected cell
+    const newBoard = board.map((row) => [...row]);
+    newBoard[newRow][col] = currentPlayer;
+    setBoard(newBoard);
+  
+    // Check for a winner
+    if (checkForWinner(newBoard, newRow, col)) {
+      setWinner(currentPlayer);
+  
+      // Update the win count in local storage
+      if (currentPlayer === 'Player 1') {
+        const newWins = parseInt(player1Wins) + 1;
+        setPlayer1Wins(newWins);
+        localStorage.setItem('player1Wins', newWins);
+      } else {
+        const newWins = parseInt(player2Wins) + 1;
+        setPlayer2Wins(newWins);
+        localStorage.setItem('player2Wins', newWins);
       }
     }
+  
+    // Send move data to the server using WebSocket
+    const moveData = {
+      type: 'makeMove',
+      col,
+    };
+  
+    if (ws) {
+      ws.send(JSON.stringify(moveData));
+    }
   };
+  
 
   const renderBoard = () => {
     return (
