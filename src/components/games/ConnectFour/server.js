@@ -14,7 +14,11 @@ const games = new Map();
 let waitingPlayers = [];
 let game; // Define game variable outside of the callback function
 
-const allowedOrigins = ['http://192.168.50.123:3000']; // Update with your allowed origins
+const allowedOrigins = [
+  'http://localhost:3000',
+  'http://208.107.245.123:3000',
+];
+
 const corsOptions = {
   origin: (origin, callback) => {
     if (allowedOrigins.includes(origin) || !origin) {
@@ -40,25 +44,32 @@ wss.on('connection', (ws) => {
         case 'joinGame':
           if (!game || game.gameOver) {
             waitingPlayers.push(ws);
-
+        
             if (waitingPlayers.length >= 2) {
               // Create a new game when there are enough waiting players
               game = new ConnectFourGame(6, 7);
               game.players = [waitingPlayers.shift(), waitingPlayers.shift()];
-
+        
+              // Assign player roles (Player 1 and Player 2)
+              game.players[0].playerNumber = 1;
+              game.players[1].playerNumber = 2;
+        
+              // Call addPlayer and log the message
               game.players.forEach((player, index) => {
+                game.addPlayer(player); // This should call the addPlayer method
+                console.log(`Player added: ${player} as Player ${player.playerNumber}`);
                 player.send(
                   JSON.stringify({
                     type: 'startGame',
                     currentPlayer: game.currentPlayer,
-                    playerNumber: index + 1,
+                    playerNumber: player.playerNumber,
                   })
                 );
               });
-
+        
               games.set(game.players[0], game);
               games.set(game.players[1], game);
-
+        
               // Check if two players have joined and the game is ready to start
               if (game.isFull()) {
                 game.players.forEach((player) => {
@@ -66,6 +77,7 @@ wss.on('connection', (ws) => {
                     JSON.stringify({
                       type: 'startGame',
                       currentPlayer: game.currentPlayer,
+                      playerNumber: player.playerNumber,
                     })
                   );
                 });
@@ -73,7 +85,7 @@ wss.on('connection', (ws) => {
             }
           }
           break;
-
+        
           case 'makeMove':
             if (game && game.players.includes(ws)) {
               const col = data.col;
@@ -103,10 +115,7 @@ wss.on('connection', (ws) => {
               }
             }
             break;
-          
-          
-          
-
+        
         default:
           console.error('Invalid message type:', data.type);
       }

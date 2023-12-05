@@ -15,7 +15,7 @@ const GameBoard = () => {
   const [playerRole, setPlayerRole] = useState(null); // Add playerRole state
 
   const initializeWebSocket = () => {
-    const newWs = new WebSocket('ws://192.168.50.123:3001');
+    const newWs = new WebSocket('ws://localhost:3001');
     newWs.onopen = () => {
       console.log('WebSocket connection established.');
     };
@@ -28,8 +28,8 @@ const GameBoard = () => {
         setWinner(data.winner);
       } else if (data.type === 'startGame') {
         setIsGameStarted(true);
-        setCurrentPlayer(data.currentPlayer);
         setPlayerRole(data.playerNumber === 1 ? 'Player 1' : 'Player 2'); // Set the player's role based on playerNumber
+        setCurrentPlayer(data.playerNumber === 1 ? 'Player 1' : 'Player 2'); // Set the current player based on playerNumber
       }
     };
   
@@ -100,7 +100,7 @@ const GameBoard = () => {
   };
 
   const handleCellClick = (row, col) => {
-    if (board[row][col] !== null || winner || !isGameStarted) {
+    if (board[row][col] !== null || winner || !isGameStarted || playerRole !== currentPlayer) {
       return;
     }
   
@@ -141,6 +141,7 @@ const GameBoard = () => {
       ws.send(JSON.stringify(moveData));
     }
   };
+  
   
 
   const renderBoard = () => {
@@ -198,13 +199,15 @@ const GameBoard = () => {
     const joinData = {
       type: 'joinGame',
     };
-
-    // Initialize the WebSocket connection when joining the game
-
+  
+    // Send a request for a player role to the server using WebSocket
     if (ws) {
       ws.send(JSON.stringify(joinData));
     }
   };
+  
+
+  
 
   return (
     <div className="center-container">
