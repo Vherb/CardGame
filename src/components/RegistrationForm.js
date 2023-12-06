@@ -25,7 +25,7 @@ function Registration() {
     try {
       // Send formData to your server for registration or login
       const response = await fetch(
-        `http://localhost:3001${isRegistering ? "/registration" : "/login"}`,
+        `http://localhost:3002${isRegistering ? "/registration" : "/login"}`,
         {
           method: "POST",
           headers: {
@@ -36,6 +36,12 @@ function Registration() {
       );
 
       if (response.ok) {
+        // Registration or login was successful
+  const responseData = await response.json();
+  
+  // Store the token and username in localStorage
+  localStorage.setItem("token", responseData.token);
+  localStorage.setItem("username", responseData.username);
         // Registration or login was successful
         alert(`${isRegistering ? "Registration" : "Login"} successful!`);
         setRegistrationError(null);

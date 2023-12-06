@@ -1,25 +1,27 @@
 import React, { useState, useEffect } from 'react';
 import './GameBoard.css';
+import NavBar from "./../../NavBar";
 
 const ROWS = 6;
 const COLUMNS = 7;
 
 const GameBoard = () => {
   const [board, setBoard] = useState(Array(ROWS).fill(Array(COLUMNS).fill(null)));
-  const [currentPlayer, setCurrentPlayer] = useState('Waiting for Player 2');
+  const [currentPlayer, setCurrentPlayer] = useState('Looking for another player...');
   const [ws, setWs] = useState(null);
   const [winner, setWinner] = useState(null);
   const [player1Wins, setPlayer1Wins] = useState(localStorage.getItem('player1Wins') || 0);
   const [player2Wins, setPlayer2Wins] = useState(localStorage.getItem('player2Wins') || 0);
   const [isGameStarted, setIsGameStarted] = useState(false);
-  const [playerRole, setPlayerRole] = useState(null); // Add playerRole state
+  const [playerRole, setPlayerRole] = useState(null);
 
   const initializeWebSocket = () => {
     const newWs = new WebSocket('ws://localhost:3001');
     newWs.onopen = () => {
       console.log('WebSocket connection established.');
+      setCurrentPlayer('Looking for another player...');
     };
-  
+
     newWs.onmessage = (event) => {
       const data = JSON.parse(event.data);
       if (data.type === 'gameUpdate') {
@@ -28,23 +30,21 @@ const GameBoard = () => {
         setWinner(data.winner);
       } else if (data.type === 'startGame') {
         setIsGameStarted(true);
-        setPlayerRole(data.playerNumber === 1 ? 'Player 1' : 'Player 2'); // Set the player's role based on playerNumber
-        setCurrentPlayer(data.playerNumber === 1 ? 'Player 1' : 'Player 2'); // Set the current player based on playerNumber
+        setPlayerRole(data.playerNumber === 1 ? 'Player 1' : 'Player 2');
+        setCurrentPlayer(data.playerNumber === 1 ? 'Player 1' : 'Player 2');
       }
     };
-  
+
     setWs(newWs);
-  
+
     return () => {
       newWs.close();
     };
   };
-  
 
   useEffect(() => {
     initializeWebSocket();
   }, []);
-
   const checkForWinner = (board, row, col) => {
     const currentPlayer = board[row][col];
 
@@ -211,13 +211,18 @@ const GameBoard = () => {
 
   return (
     <div className="center-container">
+      <NavBar/>
       <div className="game-board">
         <h1 className="title">Connect Four</h1>
         <div className="turn-indicator">
           {winner ? (
             <h2 className="player">{`${winner} wins!`}</h2>
           ) : (
-            <h2 className="player">{`Current Player: ${currentPlayer}`}</h2>
+            <h2 className="player">
+              {isGameStarted
+                ? `You're ${playerRole} | Its ${currentPlayer}'s`
+                : `Waiting for another player...`}
+            </h2>
           )}
         </div>
         <div className="wins-container">
