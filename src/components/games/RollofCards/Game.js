@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from "react";
+import axios from "axios"; // Import axios for making API requests
 import NavBar from "./../../NavBar";
 import MyCard from "./../../MyCard";
 import Dice from "./../../Dice";
@@ -128,6 +129,18 @@ function Game() {
 	const [cardsDrawn, setCardsDrawn] = useState(false);
 	const [doubleDownUsed, setDoubleDownUsed] = useState(false);
 
+	useEffect(() => {
+		// Make an API call to fetch the user's coin balance
+		axios
+		  .get(`/api/getCoinBalance/username`) // Replace 'username' with the actual username
+		  .then((response) => {
+			setCoins(response.data.coin_balance); // Update the 'coins' state with the fetched coin balance
+		  })
+		  .catch((error) => {
+			console.error("Error fetching user coins:", error);
+		  });
+	}, []);
+	
 	const toggleDescription = () => {
 		setDescriptionCollapsed(!descriptionCollapsed);
 	};
@@ -150,36 +163,47 @@ function Game() {
 		}
 	};
 
-	const drawCards = () => {
-		if (roundOver) {
-			if (coins - bet < 0) {
-				setResult("Not enough coins to place the bet.");
-				return;
-			}
+const [isDrawing, setIsDrawing] = useState(false);
 
-			const index1 = Math.floor(Math.random() * cardValues.length);
-			const index2 = Math.floor(Math.random() * cardValues.length);
+const drawCards = () => {
+  if (roundOver) {
+    if (coins - bet < 0) {
+      setResult("Not enough coins to place the bet.");
+      return;
+    }
 
-			setCardValue1(cardValues[index1]);
-			setCardValue2(cardValues[index2]);
+    const index1 = Math.floor(Math.random() * cardValues.length);
+    const index2 = Math.floor(Math.random() * cardValues.length);
 
-			setResult("");
-			setRoundOver(false);
-			setCoins(coins - bet);
-			setRoundResult("");
-			setDoubledDown(false); // Reset the doubledDown state
-			setCardsDrawn(true); // Set cardsDrawn to true
+    setCardValue1(cardValues[index1]);
+    setCardValue2(cardValues[index2]);
 
-			if (
-				cardValues[index1].label === "Ace" &&
-				cardValues[index1].color === "red" &&
-				cardValues[index2].label === "Ace" &&
-				cardValues[index2].color === "red"
-			) {
-				setJackpotInProgress(true); // Jackpot is in progress
-			}
-		}
-	};
+    setResult("");
+    setRoundOver(false);
+    setCoins(coins - bet);
+    setRoundResult("");
+    setDoubledDown(false); // Reset the doubledDown state
+    setCardsDrawn(true); // Set cardsDrawn to true
+
+    if (
+      cardValues[index1].label === "Ace" &&
+      cardValues[index1].color === "red" &&
+      cardValues[index2].label === "Ace" &&
+      cardValues[index2].color === "red"
+    ) {
+      setJackpotInProgress(true); // Jackpot is in progress
+    }
+
+    // Trigger card animation by adding the 'drawn' class
+    setIsDrawing(true);
+
+    // Remove the 'drawn' class after the animation duration (0.5s in this example)
+    setTimeout(() => {
+      setIsDrawing(false);
+    }, 500);
+  }
+};
+
 	const doubleDown = () => {
 		if (!roundOver && !doubledDown && !doubleDownUsed) {
 			const newBet = bet * 2; // Double the current bet
@@ -389,22 +413,25 @@ function Game() {
 
 							<Grid container justify='center'>
 								<Grid item xs={12} sm={6} className='centered-item'>
-									<CardContainer className='cards-container'>
-										<CardItem className='card-item'>
-											<MyCard
-												value={cardValue1.unicode}
-												fontSize='150px'
-												color={cardValue1.color}
-											/>
-										</CardItem>
-										<CardItem className='card-item'>
-											<MyCard
-												value={cardValue2.unicode}
-												fontSize='150px'
-												color={cardValue2.color}
-											/>
-										</CardItem>
-									</CardContainer>
+								<CardContainer className='cards-container'>
+<CardItem className={`card-item ${isDrawing ? 'drawn' : ''}`}>
+  <MyCard
+    value={cardValue1.unicode}
+    fontSize='150px'
+    color={cardValue1.color}
+  />
+</CardItem>
+<CardItem className={`card-item ${isDrawing ? 'drawn' : ''}`}>
+  <MyCard
+    value={cardValue2.unicode}
+    fontSize='150px'
+    color={cardValue2.color}
+  />
+</CardItem>
+
+
+</CardContainer>
+
 								</Grid>
 								<Grid item xs={12} sm={6}>
 									<DiceContainer className='dice-container'>
