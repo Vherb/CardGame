@@ -6,6 +6,10 @@ const cors = require("cors");
 const app = express();
 app.use(bodyParser.json());
 app.use(cors());
+// Import your JWT functions
+
+const { generateToken } = require('./jwt');
+
 
 // CORS configuration
 const corsOptions = {
@@ -39,60 +43,77 @@ db.getConnection((err, connection) => {
 });
 
 app.post("/registration", async (req, res) => {
-	const { email, username, password } = req.body;
-
-	console.log("Received a registration request:", {
+	try {
+	  const { email, username, password } = req.body;
+  
+	  console.log("Received a registration request:", {
 		email,
 		username,
 		password,
-	});
-
-	// Check if the username already exists in the database
-	const checkUsernameQuery = "SELECT * FROM users WHERE username = ?";
-	db.query(checkUsernameQuery, [username], async (error, results) => {
+	  });
+  
+	  // Check if the username already exists in the database
+	  const checkUsernameQuery = "SELECT * FROM users WHERE username = ?";
+	  db.query(checkUsernameQuery, [username], async (error, results) => {
 		if (error) {
-			console.error("Username check failed:", error);
-			res.status(500).json({ message: "Registration failed" });
+		  console.error("Username check failed:", error);
+		  res.status(500).json({ message: "Registration failed" });
 		} else {
-			// If a user with the same username already exists, return an error
-			if (results.length > 0) {
-				res.status(400).json({
-					message:
-						"Username already exists. Please choose a different username.",
-				});
-			} else {
-				// Hash the password and insert user data into the database
-				const hashedPassword = await bcrypt.hash(password, 10); // Hash the password (adjust salt rounds as needed)
-
-				console.log("Hashed password:", hashedPassword);
-
-				// Example query to insert data
-				const insertQuery =
-					"INSERT INTO users (email, username, password) VALUES (?, ?, ?)";
-				db.query(
-					insertQuery,
-					[email, username, hashedPassword],
-					(error, results) => {
-						if (error) {
-							console.error("Registration failed:", error);
-							res.status(500).json({ message: "Registration failed" });
-						} else {
-							if (results.affectedRows === 1) {
-								console.log("Registration successful");
-								res.status(200).json({ message: "Registration successful" });
-							} else {
-								console.error("Registration failed due to database issue");
-								res.status(500).json({
-									message: "Registration failed due to a database issue",
-								});
-							}
-						}
-					}
-				);
-			}
+		  // If a user with the same username already exists, return an error
+		  if (results.length > 0) {
+			res.status(400).json({
+			  message:
+				"Username already exists. Please choose a different username.",
+			});
+		  } else {
+			// Hash the password and insert user data into the database
+			const hashedPassword = await bcrypt.hash(password, 10); // Hash the password (adjust salt rounds as needed)
+  
+			console.log("Hashed password:", hashedPassword);
+  
+			// Example query to insert data
+			const insertQuery =
+			  "INSERT INTO users (email, username, password) VALUES (?, ?, ?)";
+			db.query(
+			  insertQuery,
+			  [email, username, hashedPassword],
+			  (error, results) => {
+				if (error) {
+				  console.error("Registration failed:", error);
+				  res.status(500).json({ message: "Registration failed" });
+				} else {
+				  if (results.affectedRows === 1) {
+					console.log("Registration successful");
+  
+					// Generate a token after successful registration
+					const userData = { username: username, email: email }; // Customize this data as needed
+					const token = generateToken(userData);
+					 // Log the token in the server console
+    console.log("Generated Token:", token);
+  
+					// Send the token as a response for successful registration
+					res.status(200).json({ token, username: username });
+				  } else {
+					console.error(
+					  "Registration failed due to database issue"
+					);
+					res.status(500).json({
+					  message: "Registration failed due to a database issue",
+					});
+				  }
+				}
+			  }
+			);
+		  }
 		}
-	});
-});
+	  });
+	} catch (error) {
+	  // Handle errors and send error response
+	  console.error("Registration failed:", error);
+	  res.status(500).json({ message: "Registration failed" });
+	}
+  });
+  
 
 app.post("/login", async (req, res) => {
 	const { username, password } = req.body;
@@ -120,7 +141,12 @@ app.post("/login", async (req, res) => {
 				if (passwordMatch) {
 					// Passwords match, login successful
 					console.log("Login successful");
-					res.status(200).json({ message: "Login successful" });
+				 // Generate a token after successful login
+				 const userData = { username: username, email: user.email }; // Customize this data as needed
+				 const token = generateToken(userData);
+	   
+				 // Send the token and username as a response for successful login
+				 res.status(200).json({ token, username: username });
 				} else {
 					// Passwords do not match, return an error
 					console.log("Incorrect password");
@@ -135,7 +161,7 @@ app.post("/login", async (req, res) => {
 	});
 });
 
-const port = 3001; // Choose an available port
+const port = 3002; // Choose an available port
 app.listen(port, () => {
 	console.log(`Server is running on port ${port}`);
 });
