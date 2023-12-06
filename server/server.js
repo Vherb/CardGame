@@ -45,6 +45,7 @@ db.getConnection((err, connection) => {
 app.post("/registration", async (req, res) => {
 	try {
 	  const { email, username, password } = req.body;
+	  
   
 	  console.log("Received a registration request:", {
 		email,
@@ -72,8 +73,9 @@ app.post("/registration", async (req, res) => {
 			console.log("Hashed password:", hashedPassword);
   
 			// Example query to insert data
-			const insertQuery =
-			  "INSERT INTO users (email, username, password) VALUES (?, ?, ?)";
+			const insertQuery = "INSERT INTO users (email, username, password, coin_balance) VALUES (?, ?, ?, 420)";
+// The "0" above sets the initial coin balance to 0.
+
 			db.query(
 			  insertQuery,
 			  [email, username, hashedPassword],
@@ -161,6 +163,27 @@ app.post("/login", async (req, res) => {
 	});
 });
 
+app.get("/api/getCoinBalance/:username", (req, res) => {
+	const username = req.params.username;
+  
+	// Query the database to get the coin balance for the specified user
+	const getCoinBalanceQuery = "SELECT coin_balance FROM users WHERE username = ?";
+	
+	db.query(getCoinBalanceQuery, [username], (error, results) => {
+	  if (error) {
+		console.error("Error fetching coin balance:", error);
+		res.status(500).json({ message: "Failed to fetch coin balance" });
+	  } else {
+		if (results.length === 1) {
+		  const coinBalance = results[0].coin_balance;
+		  res.status(200).json({ coin_balance: coinBalance });
+		} else {
+		  res.status(404).json({ message: "User not found" });
+		}
+	  }
+	});
+  });
+  
 const port = 3002; // Choose an available port
 app.listen(port, () => {
 	console.log(`Server is running on port ${port}`);

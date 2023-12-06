@@ -54,15 +54,16 @@ wss.on('connection', (ws) => {
               game.players[0].playerNumber = 1;
               game.players[1].playerNumber = 2;
         
-              // Call addPlayer and log the message
+              // Include the usernames in the 'startGame' message
               game.players.forEach((player, index) => {
-                game.addPlayer(player); // This should call the addPlayer method
+                game.addPlayer(player);
                 console.log(`Player added: ${player} as Player ${player.playerNumber}`);
                 player.send(
                   JSON.stringify({
                     type: 'startGame',
                     currentPlayer: game.currentPlayer,
                     playerNumber: player.playerNumber,
+                    username: index === 0 ? data.username : null, // Include the username for Player 1
                   })
                 );
               });
@@ -78,6 +79,7 @@ wss.on('connection', (ws) => {
                       type: 'startGame',
                       currentPlayer: game.currentPlayer,
                       playerNumber: player.playerNumber,
+                      username: player.playerNumber === 1 ? data.username : null, // Include the username for Player 1
                     })
                   );
                 });
@@ -85,6 +87,7 @@ wss.on('connection', (ws) => {
             }
           }
           break;
+        
         
           case 'makeMove':
             if (game && game.players.includes(ws)) {
@@ -116,29 +119,31 @@ wss.on('connection', (ws) => {
             }
             break;
         
-        default:
-          console.error('Invalid message type:', data.type);
-      }
-    } catch (error) {
-      console.error('Invalid message format:', error);
-    }
-  });
-
-  ws.on('close', () => {
-    console.log('Client disconnected'); // Add this line
-
-    if (game) {
-      game.players = game.players.filter((player) => player !== ws);
-      if (game.players.length === 0) {
-        games.delete(game.players[0]);
-        games.delete(game.players[1]);
-        game = null; // Reset the game if all players have left
-      }
-    } else {
-      waitingPlayers = waitingPlayers.filter((player) => player !== ws);
-    }
-  });
-});
+        
+    
+            default:
+              console.error('Invalid message type:', data.type);
+          }
+        } catch (error) {
+          console.error('Invalid message format:', error);
+        }
+      });
+    
+      ws.on('close', () => {
+        console.log('Client disconnected');
+    
+        if (game) {
+          game.players = game.players.filter((player) => player !== ws);
+          if (game.players.length === 0) {
+            games.delete(game.players[0]);
+            games.delete(game.players[1]);
+            game = null;
+          }
+        } else {
+          waitingPlayers = waitingPlayers.filter((player) => player !== ws);
+        }
+      });
+    });
 
 server.listen(PORT, () => {
   console.log(`Server is running on port ${PORT}`);
