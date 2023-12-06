@@ -117,3 +117,40 @@ button:hover {
 	margin-top: 20px; /* Add margin to separate from the elements above */
 	text-align: center; /* Center-align the result text */
 }
+
+/* Add this to your CSS file */
+.card-item {
+	transition: transform 0.5s ease-in-out;
+	transform-origin: center bottom;
+  }
+  
+/* Add this CSS to your Game.css file */
+.card-item.drawn {
+  transition: transform 0.5s ease-in-out;
+  transform: translateY(-20px); /* Adjust the Y translation as needed */
+}
+/* Add this CSS to your Game.css file */
+@keyframes flip {
+	0% {
+	  transform: rotateY(180deg);
+	  opacity: 0;
+	}
+	100% {
+	  transform: rotateY(0deg);
+	  opacity: 1;
+	}
+  }
+  
+  .card-item.drawn {
+	animation: flip 0.5s ease-in-out;
+  }
+  /* Remove the previous animation styles */
+.dice-item {
+	/* Remove the transition property */
+  }
+  
+  /* Add a style for the rotated dice face */
+  .rotated {
+	transform: rotateY(180deg);
+  }
+  

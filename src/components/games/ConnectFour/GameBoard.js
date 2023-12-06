@@ -14,12 +14,13 @@ const GameBoard = () => {
   const [player2Wins, setPlayer2Wins] = useState(localStorage.getItem('player2Wins') || 0);
   const [isGameStarted, setIsGameStarted] = useState(false);
   const [playerRole, setPlayerRole] = useState(null);
+  
 
   const initializeWebSocket = () => {
     const newWs = new WebSocket('ws://localhost:3001');
     newWs.onopen = () => {
       console.log('WebSocket connection established.');
-      setCurrentPlayer('Looking for another player...');
+      setCurrentPlayer(playerRole ? `You're ${playerRole}` : 'Looking for another player...');
     };
 
     newWs.onmessage = (event) => {
@@ -43,6 +44,11 @@ const GameBoard = () => {
   };
 
   useEffect(() => {
+    // Retrieve the username from local storage
+    const storedUsername = localStorage.getItem('username');
+    if (storedUsername) {
+      setPlayerRole(storedUsername);
+    }
     initializeWebSocket();
   }, []);
   const checkForWinner = (board, row, col) => {
@@ -198,6 +204,7 @@ const GameBoard = () => {
     console.log('Game joined.'); // Log that the game has been joined
     const joinData = {
       type: 'joinGame',
+      username: localStorage.getItem('username'), // Retrieve the username from local storage
     };
   
     // Send a request for a player role to the server using WebSocket
@@ -215,16 +222,22 @@ const GameBoard = () => {
       <div className="game-board">
         <h1 className="title">Connect Four</h1>
         <div className="turn-indicator">
-          {winner ? (
-            <h2 className="player">{`${winner} wins!`}</h2>
-          ) : (
-            <h2 className="player">
-              {isGameStarted
-                ? `You're ${playerRole} | Its ${currentPlayer}'s`
-                : `Waiting for another player...`}
-            </h2>
-          )}
-        </div>
+  <h2 className="player">
+    {winner ? (
+      `${winner} wins!`
+    ) : (
+      isGameStarted ? (
+        <span>
+          You're {playerRole} <br />
+          It's {currentPlayer === 'Player 1' ? 'Player 1' : 'Player 2'}'s Turn
+        </span>
+      ) : (
+        'Waiting for another player...'
+      )
+    )}
+  </h2>
+</div>
+
         <div className="wins-container">
           <h4 className="wins">Player 1 Wins: {player1Wins}</h4>
           <h4 className="wins">Player 2 Wins: {player2Wins}</h4>
