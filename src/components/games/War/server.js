@@ -2,7 +2,7 @@ const express = require('express');
 const http = require('http');
 const WebSocket = require('ws');
 const cors = require('cors');
-const ConnectFourGame = require('./ConnectFourGame');
+const WarGame = require('./WarGame');
 
 const app = express();
 const server = http.createServer(app);
@@ -47,7 +47,7 @@ wss.on('connection', (ws) => {
         
             if (waitingPlayers.length >= 2) {
               // Create a new game when there are enough waiting players
-              game = new ConnectFourGame(6, 7);
+              game = new WarGame(6, 7);
               game.players = [waitingPlayers.shift(), waitingPlayers.shift()];
         
               // Assign player roles (Player 1 and Player 2)

@@ -9,21 +9,22 @@
 	margin-bottom: 16px;
 	border: 2px solid #388e3c; /* Border color for the jackpot description */
 	border-radius: 10px; /* Border radius for the jackpot description */
-}
-
-/* Styling for the dice character */
-.jackpot-dice {
+  }
+  
+  /* Styling for the dice character */
+  .jackpot-dice {
 	font-size: 50px; /* Adjust the font size for the dice character */
 	color: #000000;
-}
-.jackpot-card {
+  }
+  
+  .jackpot-card {
 	font-size: 60px; /* Adjust the font size for the dice character */
 	margin-right: 8px; /* Add some spacing between the dice and text */
 	color: red;
-}
-
-/* Styling for the result box */
-.round-result-box {
+  }
+  
+  /* Styling for the result box */
+  .round-result-box {
 	width: 50%; /* You can change this value as needed */
 	max-width: 200px; /* Add a max-width to limit the width */
 	height: auto; /* Remove fixed height */
@@ -37,10 +38,10 @@
 	align-items: center; /* Vertically center the content */
 	justify-content: center; /* Horizontally center the content */
 	flex-direction: column; /* Stack children vertically */
-}
-
-/* Styling for the balance box */
-.balance-box {
+  }
+  
+  /* Styling for the balance box */
+  .balance-box {
 	width: 50%; /* You can change this value as needed */
 	max-width: 200px; /* Add a max-width to limit the width */
 	height: auto; /* Remove fixed height */
@@ -54,37 +55,39 @@
 	align-items: center;
 	justify-content: center;
 	flex-direction: column; /* Stack children vertically */
-}
-
-/* Add margin to the results label */
-.results-label {
+  }
+  
+  /* Add margin to the results label */
+  .results-label {
 	margin-bottom: 5px; /* Add some spacing between label and result */
 	font-weight: bold; /* Make the label bold */
 	font-size: 50px; /* Adjust the font size as needed */
 	color: #333; /* Change the label text color as needed */
-}
-/* Remove border and make the container size match the cards */
-
-.cards-container .card {
+  }
+  
+  /* Remove border and make the container size match the cards */
+  .cards-container .card {
 	border: none;
-}
-.game-container {
+  }
+  
+  .game-container {
 	display: flex;
 	justify-content: center;
 	align-items: center;
 	flex-wrap: wrap;
 	gap: 20px;
-}
-
-.coin-display {
-	background-color: #abfcf6;
+	background-color: #f4f4f4;
+  }
+  
+  .coin-display {
+	background-color: #f4f4f4;
 	border: 1px solid #ddd;
 	padding: 20px;
 	border-radius: 8px;
 	box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
-}
-
-button {
+  }
+  
+  button {
 	background-color: #007bff;
 	color: #fff;
 	font-size: 24px; /* Increase the font size for buttons */
@@ -94,43 +97,44 @@ button {
 	cursor: pointer;
 	margin-top: 20px; /* Increase the margin-top for buttons */
 	transition: background-color 0.2s;
-}
-
-button:hover {
+  }
+  
+  button:hover {
 	background-color: #0056b3;
-}
-
-.card {
+  }
+  
+  .card {
 	font-size: 100px; /* Increase the font size for cards */
 	background-color: #fff;
 	border: none;
-}
-
-.dice {
+  }
+  
+  .dice {
 	font-size: 60px; /* Increase the font size for dice */
 	background-color: #fff;
-}
-
-/* Style the result and round result elements */
-.result {
+  }
+  
+  /* Style the result and round result elements */
+  .result {
 	font-size: 24px;
 	margin-top: 20px; /* Add margin to separate from the elements above */
 	text-align: center; /* Center-align the result text */
-}
-
-/* Add this to your CSS file */
-.card-item {
+  }
+  
+  /* Add this to your CSS file */
+  .card-item {
 	transition: transform 0.5s ease-in-out;
 	transform-origin: center bottom;
   }
   
-/* Add this CSS to your Game.css file */
-.card-item.drawn {
-  transition: transform 0.5s ease-in-out;
-  transform: translateY(-20px); /* Adjust the Y translation as needed */
-}
-/* Add this CSS to your Game.css file */
-@keyframes flip {
+  /* Add this CSS to your Game.css file */
+  .card-item.drawn {
+	transition: transform 0.5s ease-in-out;
+	transform: translateY(-20px); /* Adjust the Y translation as needed */
+  }
+  
+  /* Add this CSS to your Game.css file */
+  @keyframes flip {
 	0% {
 	  transform: rotateY(180deg);
 	  opacity: 0;
@@ -144,10 +148,8 @@ button:hover {
   .card-item.drawn {
 	animation: flip 0.5s ease-in-out;
   }
+  
   /* Remove the previous animation styles */
-.dice-item {
-	/* Remove the transition property */
-  }
   
   /* Add a style for the rotated dice face */
   .rotated {

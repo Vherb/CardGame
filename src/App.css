@@ -4,7 +4,7 @@
 
 body {
   font-family: Arial, sans-serif;
-  background-color: #f5f5f5;
+  background-color: #841b1b;
   margin: 0;
   padding: 0;
 }
@@ -30,14 +30,15 @@ p {
   justify-content: center;
   align-items: center;
   flex-wrap: wrap;
+  background-color: #ad0000;
 
 }
 .game-card{
-background-color: #EEFEFD;
+background-color: #ad0808;
 }
 
 .game-background{
-background-color: #D3FFF5;
+background-color: #ffffff;
 }
 
 .coin-display {
@@ -50,7 +51,7 @@ background-color: #D3FFF5;
 
 button {
   background-color: #007BFF;
-  color: #fff;
+  color: #8e1313;
   font-size: 24px; /* Increase the font size for buttons */
   padding: 15px 30px; /* Adjust button padding */
   border: none;

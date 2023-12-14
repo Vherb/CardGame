@@ -129,17 +129,7 @@ function Game() {
 	const [cardsDrawn, setCardsDrawn] = useState(false);
 	const [doubleDownUsed, setDoubleDownUsed] = useState(false);
 
-	useEffect(() => {
-		// Make an API call to fetch the user's coin balance
-		axios
-		  .get(`/api/getCoinBalance/username`) // Replace 'username' with the actual username
-		  .then((response) => {
-			setCoins(response.data.coin_balance); // Update the 'coins' state with the fetched coin balance
-		  })
-		  .catch((error) => {
-			console.error("Error fetching user coins:", error);
-		  });
-	}, []);
+
 	
 	const toggleDescription = () => {
 		setDescriptionCollapsed(!descriptionCollapsed);
@@ -232,73 +222,83 @@ const drawCards = () => {
 	};
 	const rollDice = () => {
 		if (!roundOver) {
-			// Generate random dice rolls (assuming a standard 6-sided die)
-			const roll1 = Math.floor(Math.random() * 6) + 1;
-			const roll2 = Math.floor(Math.random() * 6) + 1;
-
-			setDiceValue1(roll1);
-			setDiceValue2(roll2);
-
-			// Convert face cards and Ace to their correct values
-			const cardValue1Number = getCardValue(cardValue1.unicode);
-			const cardValue2Number = getCardValue(cardValue2.unicode);
-
-			const sum = roll1 + roll2;
-
-			if (sum === cardValue1Number + cardValue2Number) {
-				// If the sum of dice equals the combined value of cards, you win 10 times the bet
-				const winnings = bet * 5;
-				const newBalance = (parseFloat(coins) + winnings).toFixed(2);
-				setCoins(newBalance);
-				setPayoutMultiplier(parseFloat((payoutMultiplier + 2.0).toFixed(1)));
-				setRoundResult(`You won $${winnings.toFixed(2)}! (5x)`);
-			} else if (sum === cardValue1Number || sum === cardValue2Number) {
-				// If the sum matches one of the card values, it's a tie
-				const tieWinnings = bet;
-				const newBalance = (parseFloat(coins) + tieWinnings).toFixed(2);
-				setCoins(newBalance);
-				setPayoutMultiplier(parseFloat((payoutMultiplier + 0.1).toFixed(1)));
-				setRoundResult(`It's a tie! You get your bet back.`);
-			} else if (
-				(sum > cardValue1Number && sum < cardValue2Number) ||
-				(sum < cardValue1Number && sum > cardValue2Number)
-			) {
-				// You win when the sum falls between the two card values
-				const winnings = bet * payoutMultiplier;
-				const newBalance = (parseFloat(coins) + winnings).toFixed(2);
-				setCoins(newBalance);
-
-				// Increase the payoutMultiplier by 0.2x for the next round (rounded to 1 decimal place)
-				setPayoutMultiplier(parseFloat((payoutMultiplier + 0.3).toFixed(1)));
-				setRoundResult(`You won $${winnings.toFixed(2)}!`);
-			} else {
-				// Check for two ones rolled and jackpot in progress
-				if (roll1 === 1 && roll2 === 1 && jackpotInProgress) {
-					// Special win condition: Two ones rolled and jackpot is in progress
-					const JackpotWin = bet * 50;
-					const newBalance = (parseFloat(coins) + JackpotWin).toFixed(2);
-					setCoins(newBalance);
-					setRoundResult(
-						`Special win! You won $${JackpotWin.toFixed(2)}! (50x)`
-					);
-				} else {
-					// You lose when the sum is outside the range
-					const lostCoins = bet;
-
-					setRoundResult(`You lost $${lostCoins.toFixed(2)}!`);
-
-					// Reset the payoutMultiplier to its initial value when you lose
-					setPayoutMultiplier(1.2);
+			let rollCount = 0;
+			const maxRolls = 10; // Number of animation iterations
+			const intervalTime = 100; // Time between each iteration (in milliseconds)
+	
+			const interval = setInterval(() => {
+				// Temporary dice values for animation
+				const tempValue1 = Math.ceil(Math.random() * 6);
+				const tempValue2 = Math.ceil(Math.random() * 6);
+	
+				// Update the state with these temporary values
+				setDiceValue1(tempValue1);
+				setDiceValue2(tempValue2);
+	
+				rollCount++;
+				if (rollCount > maxRolls) {
+					clearInterval(interval); // Stop the animation
+	
+					// Final dice values
+					const roll1 = Math.floor(Math.random() * 6) + 1;
+					const roll2 = Math.floor(Math.random() * 6) + 1;
+					setDiceValue1(roll1);
+					setDiceValue2(roll2);
+	
+					// Convert face cards and Ace to their correct values
+					const cardValue1Number = getCardValue(cardValue1.unicode);
+					const cardValue2Number = getCardValue(cardValue2.unicode);
+	
+					const sum = roll1 + roll2;
+	
+					if (sum === cardValue1Number + cardValue2Number) {
+						// If the sum of dice equals the combined value of cards, you win
+						const winnings = bet * 5;
+						const newBalance = (parseFloat(coins) + winnings).toFixed(2);
+						setCoins(newBalance);
+						setPayoutMultiplier(parseFloat((payoutMultiplier + 2.0).toFixed(1)));
+						setRoundResult(`You won $${winnings.toFixed(2)}! (5x)`);
+					} else if (sum === cardValue1Number || sum === cardValue2Number) {
+						// If the sum matches one of the card values, it's a tie
+						const tieWinnings = bet;
+						const newBalance = (parseFloat(coins) + tieWinnings).toFixed(2);
+						setCoins(newBalance);
+						setPayoutMultiplier(parseFloat((payoutMultiplier + 0.1).toFixed(1)));
+						setRoundResult(`It's a tie! You get your bet back.`);
+					} else if (
+						(sum > cardValue1Number && sum < cardValue2Number) ||
+						(sum < cardValue1Number && sum > cardValue2Number)
+					) {
+						// You win when the sum falls between the two card values
+						const winnings = bet * payoutMultiplier;
+						const newBalance = (parseFloat(coins) + winnings).toFixed(2);
+						setCoins(newBalance);
+						setPayoutMultiplier(parseFloat((payoutMultiplier + 0.3).toFixed(1)));
+						setRoundResult(`You won $${winnings.toFixed(2)}!`);
+					} else {
+						// Check for two ones rolled and jackpot in progress
+						if (roll1 === 1 && roll2 === 1 && jackpotInProgress) {
+							// Special win condition: Two ones rolled and jackpot is in progress
+							const JackpotWin = bet * 50;
+							const newBalance = (parseFloat(coins) + JackpotWin).toFixed(2);
+							setCoins(newBalance);
+							setRoundResult(`Special win! You won $${JackpotWin.toFixed(2)}! (50x)`);
+						} else {
+							// You lose when the sum is outside the range
+							const lostCoins = bet;
+							setRoundResult(`You lost $${lostCoins.toFixed(2)}!`);
+							setPayoutMultiplier(1.2);
+						}
+					}
+					setJackpotInProgress(false);
+					setRoundOver(true);
+					resetDoubleDownUsed();
 				}
-			}
-			setJackpotInProgress(false);
-			// Set the roundOver flag to true
-			setRoundOver(true);
-			// Reset doubleDownUsed when the round is over
-			resetDoubleDownUsed();
+			}, intervalTime);
 		}
+		// Other logic (if any) that is not part of the dice roll process
 	};
-
+	
 	const getCardValue = (card) => {
 		const selectedCard = cardValues.find((c) => c.unicode === card);
 		if (selectedCard) {
