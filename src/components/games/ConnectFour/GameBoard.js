@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import './GameBoard.css';
 import NavBar from "./../../NavBar";
 
+
 const ROWS = 6;
 const COLUMNS = 7;
 

@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from "react";
-import { Navbar, Nav, Container, NavDropdown } from "react-bootstrap";
+import { Navbar, Nav } from "react-bootstrap";
+import "./App.css";
 
 function NavBar() {
   const [isUserLoggedIn, setIsUserLoggedIn] = useState(false);
@@ -26,31 +27,35 @@ function NavBar() {
   };
 
   return (
-    <Navbar bg="dark" variant="dark" expand="lg" fixed="top">
-      <Container>
-        <Navbar.Brand>Roll of Cards</Navbar.Brand>
-        <Navbar.Toggle aria-controls="basic-navbar-nav" />
-        <Navbar.Collapse id="basic-navbar-nav">
-          <Nav className="ml-auto">
-            {isUserLoggedIn ? (
-              <>
-                <Nav.Link>Welcome, {username}!</Nav.Link>
-                <Nav.Link onClick={handleLogout}>Logout</Nav.Link>
-              </>
-            ) : (
-              <Nav.Link href="/registration" style={{ marginRight: "10px" }}>
-                Login/Register
-              </Nav.Link>
-            )}
-            <Nav.Link href="#">Deposit</Nav.Link>
-            <NavDropdown title="Games" id="basic-nav-dropdown">
-              <NavDropdown.Item href="/Game2">In-Between</NavDropdown.Item>
-              <NavDropdown.Item href="/connect-four">Connect Four</NavDropdown.Item>
-              <NavDropdown.Item href="/">Roll of Cards</NavDropdown.Item>
-            </NavDropdown>
-          </Nav>
-        </Navbar.Collapse>
-      </Container>
+    <Navbar bg="dark" variant="dark" fixed="top">
+      <Nav justify className="w-100" defaultActiveKey="/home">
+        <Nav.Item>
+          <Nav.Link href="/">Roll of Cards</Nav.Link>
+        </Nav.Item>
+        <Nav.Item>
+          <Nav.Link href="/Game2">In-Between</Nav.Link>
+        </Nav.Item>
+        <Nav.Item>
+          <Nav.Link href="/connect-four">Connect Four</Nav.Link>
+        </Nav.Item>
+        <Nav.Item>
+          <Nav.Link href="/war">War</Nav.Link>
+        </Nav.Item>
+        {isUserLoggedIn ? (
+          <>
+            <Nav.Item>
+              <Nav.Link>Welcome, {username}!</Nav.Link>
+            </Nav.Item>
+            <Nav.Item>
+              <Nav.Link onClick={handleLogout}>Logout</Nav.Link>
+            </Nav.Item>
+          </>
+        ) : (
+          <Nav.Item>
+            <Nav.Link href="/registration">Login/Register</Nav.Link>
+          </Nav.Item>
+        )}
+      </Nav>
     </Navbar>
   );
 }

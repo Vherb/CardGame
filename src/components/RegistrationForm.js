@@ -25,7 +25,7 @@ function Registration() {
     try {
       // Send formData to your server for registration or login
       const response = await fetch(
-        `http://localhost:3002${isRegistering ? "/registration" : "/login"}`,
+        `http://cardndice.atspace.cc:3002${isRegistering ? "/registration" : "/login"}`,
         {
           method: "POST",
           headers: {
@@ -34,7 +34,7 @@ function Registration() {
           body: JSON.stringify(formData),
         }
       );
-
+      
       if (response.ok) {
         // Registration or login was successful
   const responseData = await response.json();

@@ -2,6 +2,7 @@ import React from "react";
 import Game from "./components/games/RollofCards/Game";
 import InBetweenGame from "./components/games/inBetween/InBetween";
 import GameBoard from "./components/games/ConnectFour/GameBoard"; // Import your Connect Four game component
+import GameTable from "./components/games/War/GameTable"; // Import your Connect Four game component
 
 import "./App.css"; // You can add CSS styles here
 import "bootstrap/dist/css/bootstrap.min.css";
@@ -16,6 +17,7 @@ function App() {
 			<Route path='/game2' element={<InBetweenGame />} />
 			<Route path='/registration' element={<RegistrationForm />} />
 			<Route path="/connect-four" element={<GameBoard />} />
+			<Route path="/war" element={<GameTable />} />
 		</Routes>
 	);
 }
