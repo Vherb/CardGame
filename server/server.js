@@ -13,7 +13,7 @@ const { generateToken } = require('./jwt');
 
 // CORS configuration
 const corsOptions = {
-	origin: "http://localhost:3000", // Replace with the actual origin of your frontend
+	origin: "http://cardndice.atspace.cc", // Replace with the actual origin of your frontend
 	methods: "GET,HEAD,PUT,PATCH,POST,DELETE",
 	credentials: true, // Enable CORS credentials (cookies, HTTP authentication)
 };
@@ -22,10 +22,10 @@ app.use(cors(corsOptions)); // Apply the CORS configuration
 
 // Database configuration
 const db = mysql.createPool({
-	host: "localhost",
-	user: "root", // Use your MySQL username here
-	password: "", // Use your MySQL password here
-	database: "game",
+	host: "pdb1007.atspace.me",
+	user: "2290917_game", // Use your MySQL username here
+	password: "ltmq6196", // Use your MySQL password here
+	database: "2290917_game",
 	port: 3306,
 	connectionLimit: 10, // Adjust the connection limit as needed
 });

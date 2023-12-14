@@ -1,13 +1,10 @@
-<<<<<<< HEAD
 
 
-=======
->>>>>>> origin/main
 /* App.css */
 
 body {
 	font-family: Arial, sans-serif;
-	background-color: #abfcf6;
+	background-color: #ffffff;
 	margin: 0;
 	padding: 0;
 }
@@ -26,4 +23,9 @@ p {
 	font-size: 15%;
 }
 
-/* card animations */
+/* Add this CSS to your stylesheets */
+
+/* Add this CSS to your App.css file */
+.navbar-nav .nav-link:hover {
+	color: #81e8e8; /* Change the color to your preferred hover color */
+  }
