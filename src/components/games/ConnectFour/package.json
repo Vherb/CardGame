@@ -1,0 +1,17 @@
+{
+  "name": "connectfour-client",
+  "version": "1.0.0",
+  "private": true,
+  "homepage": ".",
+  "scripts": {
+    "start": "react-scripts start",
+    "build": "react-scripts build"
+  },
+  "dependencies": {
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0",
+    "react-router-dom": "^6.26.1",
+    "bootstrap": "^5.3.8",
+    "bootstrap-icons": "^1.11.3"
+  }
+}

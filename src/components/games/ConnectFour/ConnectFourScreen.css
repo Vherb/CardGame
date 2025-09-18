@@ -1,0 +1,54 @@
+/* ====== Screen shell for Connect Four ====== */
+
+:root { --nav-h: 64px; }
+@media (min-width: 992px) { :root { --nav-h: 92px; } }
+
+.cf-screen {
+  min-height: 100dvh;
+  background: #0b1220;
+  color: #e5e7eb;
+}
+
+/* Fixed top nav */
+.app-nav {
+  position: fixed;
+  inset: 0 0 auto 0;
+  height: var(--nav-h);
+  z-index: 1000;
+  background: linear-gradient(120deg, #6d28d9, #2563eb, #06b6d4);
+  color: #fff;
+  box-shadow: 0 6px 18px rgba(0,0,0,.35);
+}
+.app-nav__inner {
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: .75rem;
+  padding: 0 .9rem;
+}
+.app-nav__title { font-weight: 900; letter-spacing: .2px; font-size: 1.05rem; }
+.app-nav__btn {
+  display: inline-grid; place-items: center;
+  width: 36px; height: 36px; border-radius: 10px;
+  background: rgba(255,255,255,.18); border: 0; color: #fff;
+}
+
+/* Spacer pushes content below fixed nav */
+.app-nav-spacer { height: var(--nav-h); }
+
+/* Scrollable content area */
+.app-content {
+  min-height: calc(100dvh - var(--nav-h));
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  padding: 12px;
+}
+
+/* When GameBoard is embedded, hide its inner header/spacer */
+.cf-embed .nav-spacer,
+.cf-embed .cf-hero { display: none !important; }
+
+/* Let the embedded GameBoard breathe and scroll past the bottom */
+.cf-embed .container { padding: 0 !important; max-width: 100% !important; }
+.cf-embed .board-card-wrap { margin-bottom: 120px !important; }

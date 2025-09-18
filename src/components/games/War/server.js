@@ -1,150 +1,233 @@
-const express = require('express');
+// server.js — War (cards) PvP server with matchmaking, countdown, stakes, payouts-ready hooks
+
 const http = require('http');
+const express = require('express');
 const WebSocket = require('ws');
 const cors = require('cors');
-const WarGame = require('./WarGame');
+const { WarGame } = require('./WarGame'); // new class below
 
+/* ---------- Server ---------- */
+const PORT = process.env.PORT || 3001;
 const app = express();
+
+// tighten this as needed for your hosts
+app.use(cors());
+
+app.get('/health', (_req, res) => res.json({ ok: true, ts: Date.now() }));
+
 const server = http.createServer(app);
 const wss = new WebSocket.Server({ server });
 
-const PORT = process.env.PORT || 3001;
+/* ---------- Helpers ---------- */
+const isOpen = (ws) => ws && ws.readyState === WebSocket.OPEN;
+const send = (ws, payload) => { if (isOpen(ws)) { try { ws.send(JSON.stringify(payload)); } catch {} } };
+const broadcast = (players, payload) => players.forEach(ws => send(ws, payload));
 
-const games = new Map();
-let waitingPlayers = [];
-let game; // Define game variable outside of the callback function
+/* ---------- Matchmaking ---------- */
+const waiting = new Set();
+const rooms = new Map(); // id -> { id, players:[a,b], game, meta, countdownTimer, countdownValue }
 
-const allowedOrigins = [
-  
-  'http://192.168.0.252:3000',
-];
+function addToWaiting(ws) { if (isOpen(ws)) waiting.add(ws); }
+function takePair() {
+  for (const ws of [...waiting]) if (!isOpen(ws)) waiting.delete(ws);
+  const arr = [...waiting];
+  if (arr.length < 2) return null;
+  const a = arr[0], b = arr.find(x => x !== a);
+  if (!b) return null;
+  waiting.delete(a); waiting.delete(b);
+  return [a, b];
+}
 
-const corsOptions = {
-  origin: (origin, callback) => {
-    if (allowedOrigins.includes(origin) || !origin) {
-      callback(null, true);
+/* ---------- Room lifecycle ---------- */
+let nextRoomId = 1;
+
+function createRoom(a, b, metaA, metaB) {
+  const id = nextRoomId++;
+  const players = [a, b];
+
+  const game = new WarGame(); // shuffles decks for both players
+  const meta = {
+    usernames: { 'Player 1': metaA.username || 'Player 1', 'Player 2': metaB.username || 'Player 2' },
+    avatars:   { 'Player 1': metaA.avatar || 'rocket',      'Player 2': metaB.avatar || 'alien' },
+    stakes:    { 'Player 1': Number(metaA.stake || 0),      'Player 2': Number(metaB.stake || 0) },
+  };
+
+  rooms.set(id, { id, players, game, meta, countdownTimer: null, countdownValue: null });
+
+  // attach room id + role for each socket
+  a.__roomId = id; a.__role = 'Player 1';
+  b.__roomId = id; b.__role = 'Player 2';
+
+  // paired (per-socket "you") + initial stakes
+  send(a, { type: 'paired', you: 1, ...meta });
+  send(b, { type: 'paired', you: 2, ...meta });
+
+  // short countdown
+  startCountdown(id);
+}
+
+function startCountdown(id) {
+  const room = rooms.get(id);
+  if (!room) return;
+  room.countdownValue = 5;
+
+  const tick = () => {
+    const r = rooms.get(id);
+    if (!r) return;
+    if (!r.players.every(isOpen)) { cancelAndNotify(id); return; }
+
+    if (r.countdownValue > 0) {
+      broadcast(r.players, { type: 'countdown', value: r.countdownValue });
+      r.countdownValue -= 1;
     } else {
-      callback(new Error('Not allowed by CORS'));
+      clearInterval(r.countdownTimer);
+      r.countdownTimer = null;
+      r.countdownValue = null;
+
+      // start!
+      const startPayload = {
+        type: 'startGame',
+        usernames: r.meta.usernames,
+        avatars: r.meta.avatars,
+        stakes: r.meta.stakes,
+        scores: r.game.getScores(),
+        currentRound: r.game.round,
+      };
+      // role numbers
+      send(r.players[0], { ...startPayload, playerNumber: 1 });
+      send(r.players[1], { ...startPayload, playerNumber: 2 });
+
+      // immediately let both draw button be active
+      broadcast(r.players, { type: 'turn', canDeal: true });
     }
-  },
-};
+  };
 
-app.use(cors(corsOptions));
+  room.countdownTimer = setInterval(tick, 1000);
+  tick(); // first emit
+}
 
+function cancelAndNotify(id) {
+  const room = rooms.get(id);
+  if (!room) return;
+  if (room.countdownTimer) clearInterval(room.countdownTimer);
+  room.countdownTimer = null;
+  room.countdownValue = null;
+  broadcast(room.players, { type: 'opponentLeft' });
+  destroyRoom(id);
+}
+
+function destroyRoom(id) {
+  const room = rooms.get(id);
+  if (!room) return;
+  for (const ws of room.players) {
+    if (ws) { delete ws.__roomId; delete ws.__role; }
+  }
+  rooms.delete(id);
+}
+
+/* ---------- Socket flow ---------- */
 wss.on('connection', (ws) => {
-  console.log('Client connected'); // Add this line
+  ws.__roomId = null; ws.__role = null; ws.isAlive = true;
+  ws.on('pong', () => { ws.isAlive = true; });
 
-  ws.on('message', (message) => {
-    try {
-      console.log('Received message:', message); // Add this line
+  ws.on('message', (raw) => {
+    let data;
+    try { data = JSON.parse(raw.toString()); } catch { return; }
 
-      const data = JSON.parse(message);
+    switch (data.type) {
+      case 'joinGame': {
+        // meta sent from client
+        const username = (data.username || '').toString().slice(0, 40);
+        const avatar   = (data.avatar || 'rocket').toString().slice(0, 24);
+        const stake    = Math.max(0, Number(data.stake || 0));
 
-      switch (data.type) {
-        case 'joinGame':
-          if (!game || game.gameOver) {
-            waitingPlayers.push(ws);
-        
-            if (waitingPlayers.length >= 2) {
-              // Create a new game when there are enough waiting players
-              game = new WarGame(6, 7);
-              game.players = [waitingPlayers.shift(), waitingPlayers.shift()];
-        
-              // Assign player roles (Player 1 and Player 2)
-              game.players[0].playerNumber = 1;
-              game.players[1].playerNumber = 2;
-        
-              // Include the usernames in the 'startGame' message
-              game.players.forEach((player, index) => {
-                game.addPlayer(player);
-                console.log(`Player added: ${player} as Player ${player.playerNumber}`);
-                player.send(
-                  JSON.stringify({
-                    type: 'startGame',
-                    currentPlayer: game.currentPlayer,
-                    playerNumber: player.playerNumber,
-                    username: index === 0 ? data.username : null, // Include the username for Player 1
-                  })
-                );
-              });
-        
-              games.set(game.players[0], game);
-              games.set(game.players[1], game);
-        
-              // Check if two players have joined and the game is ready to start
-              if (game.isFull()) {
-                game.players.forEach((player) => {
-                  player.send(
-                    JSON.stringify({
-                      type: 'startGame',
-                      currentPlayer: game.currentPlayer,
-                      playerNumber: player.playerNumber,
-                      username: player.playerNumber === 1 ? data.username : null, // Include the username for Player 1
-                    })
-                  );
-                });
-              }
-            }
-          }
-          break;
-        
-        
-          case 'makeMove':
-            if (game && game.players.includes(ws)) {
-              const col = data.col;
-          
-              // Attempt to make a move and check if it's valid
-              const validMove = game.makeMove(col);
-          
-              if (validMove) {
-                // Check for a winner here and set the game as over if needed
-                const row = game.findEmptyRow(col); // Find the row where the move was made
-                if (game.checkWin(row, col)) { // Pass row and col to checkWin
-                  game.gameOver = true;
-                }
-          
-                // Send game update to all players in the game
-                game.players.forEach((player) => {
-                  player.send(
-                    JSON.stringify({
-                      type: 'gameUpdate',
-                      board: game.board,
-                      currentPlayer: game.currentPlayer,
-                      winner: game.winner,
-                      playerNumber: player.playerNumber,
-                    })
-                  );
-                });
-              }
-            }
-            break;
-        
-        
-    
-            default:
-              console.error('Invalid message type:', data.type);
-          }
-        } catch (error) {
-          console.error('Invalid message format:', error);
+        // if already in a room, ignore
+        if (ws.__roomId) return;
+
+        ws.__meta = { username, avatar, stake };
+        addToWaiting(ws);
+        send(ws, { type: 'queued' });
+
+        const pair = takePair();
+        if (pair) {
+          const [a, b] = pair;
+          createRoom(a, b, a.__meta || {}, b.__meta || {});
         }
-      });
-    
-      ws.on('close', () => {
-        console.log('Client disconnected');
-    
-        if (game) {
-          game.players = game.players.filter((player) => player !== ws);
-          if (game.players.length === 0) {
-            games.delete(game.players[0]);
-            games.delete(game.players[1]);
-            game = null;
-          }
+        break;
+      }
+
+      case 'deal': {
+        const id = ws.__roomId;
+        const room = id && rooms.get(id);
+        if (!room) return;
+        if (!room.players.every(isOpen)) { cancelAndNotify(id); return; }
+
+        // Only run a round once per request burst; server is authoritative.
+        const result = room.game.playRound(); // draws + compares
+        // result: { p1Card, p2Card, roundWinner, scores, round, warDepth }
+        broadcast(room.players, { type: 'round', ...result });
+
+        if (result.matchWinner) {
+          // final winner
+          broadcast(room.players, { type: 'gameOver', winner: result.matchWinner, scores: result.scores });
+
+          // leave payout to client wallet (each client pays/credits themselves)
+          // Room can be destroyed after a short delay so users can tap Rematch.
+          setTimeout(() => destroyRoom(id), 2000);
         } else {
-          waitingPlayers = waitingPlayers.filter((player) => player !== ws);
+          // enable another deal
+          broadcast(room.players, { type: 'turn', canDeal: true });
         }
-      });
-    });
+        break;
+      }
 
-server.listen(PORT, () => {
-  console.log(`Server is running on port ${PORT}`);
+      case 'rematchVote': {
+        const id = ws.__roomId;
+        const room = id && rooms.get(id);
+        if (!room) return;
+        room.rematchVotes = room.rematchVotes || new Set();
+        room.rematchVotes.add(ws.__role);
+        broadcast(room.players, { type: 'rematchUpdate', count: room.rematchVotes.size });
+        if (room.rematchVotes.size >= 2) {
+          room.game = new WarGame();
+          room.rematchVotes.clear();
+          broadcast(room.players, { type: 'rematchStart', scores: room.game.getScores(), currentRound: room.game.round });
+          broadcast(room.players, { type: 'turn', canDeal: true });
+        }
+        break;
+      }
+
+      case 'leaveGame': {
+        const id = ws.__roomId;
+        if (id && rooms.get(id)) cancelAndNotify(id);
+        waiting.delete(ws);
+        break;
+      }
+
+      default: break;
+    }
+  });
+
+  ws.on('close', () => {
+    if (ws.__roomId && rooms.get(ws.__roomId)) cancelAndNotify(ws.__roomId);
+    waiting.delete(ws);
+  });
+
+  ws.on('error', () => {
+    if (ws.__roomId && rooms.get(ws.__roomId)) cancelAndNotify(ws.__roomId);
+    waiting.delete(ws);
+  });
+});
+
+/* ---------- Heartbeat ---------- */
+setInterval(() => {
+  for (const ws of wss.clients) {
+    if (!ws.isAlive) { try { ws.terminate(); } catch {} continue; }
+    ws.isAlive = false;
+    try { ws.ping(); } catch {}
+  }
+}, 15000);
+
+server.listen(PORT, '0.0.0.0', () => {
+  console.log(`War WS server on http://0.0.0.0:${PORT}`);
 });

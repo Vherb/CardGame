@@ -1,57 +1,399 @@
-.center-container {
-	display: flex;
-	flex-direction: column;
-	align-items: center;
-	justify-content: center;
-	min-height: 100vh;
-	background-color: #f4f4f4;
-	padding: 20px;
+/* GameTable.css — clean, mobile-first War table, reused card aesthetic */
+
+/* page */
+/* Use the same dark/neon radial background as other pages so War matches the theme */
+.war-page { min-height: 100dvh; background: radial-gradient(60% 60% at 50% 10%, #3b1d55 0%, #140a1c 55%, #0a0613 75%, #000 100%); color: #e5e7eb; display:flex; flex-direction:column; }
+
+/* ensure the War page root honors the global navbar height and never sits underneath it */
+.gambit-war-page {
+  /* push everything below the global NavBar; add a little extra gap */
+  padding-top: calc(var(--nav-height, 64px) + 12px) !important;
+  box-sizing: border-box;
+  /* use the site-wide dark/neon radial background */
+  background: radial-gradient(60% 60% at 50% 10%, #3b1d55 0%, #140a1c 55%, #0a0613 75%, #000 100%);
+}
+/* --- NEW: force the global LED to sit flush on top of the gameboard for War page --- */
+/* The LED is a fixed element rendered by App.js; override its top so its bottom touches the table top. */
+.led-topbar {
+  position: fixed;
+  left: 50%;
+  transform: translateX(-50%);
+  top: calc(var(--nav-height, 64px));
+  width: min(84vw, 980px);
+  max-width: 980px;
+  height: 12px;
+  border-radius: 999px;
+  pointer-events: none;
+  z-index: 11000 !important; /* sit above most UI but below modal/fullscreen elements */
+  display: block;
+}
+
+/* Inner animated strip (the visible light run) */
+.led-topbar .led-run {
+  position: absolute;
+  inset: 0;
+  border-radius: 999px;
+  background: linear-gradient(90deg, rgba(255,110,220,0.95) 0%, rgba(0,230,198,0.9) 40%, rgba(255,110,220,0.95) 100%);
+  box-shadow: 0 6px 24px rgba(255,110,220,0.12), inset 0 2px 12px rgba(255,255,255,0.04);
+  /* speed is controlled by --led-speed; default to 4s */
+  animation: gflash var(--led-speed, 4s) linear infinite;
+  opacity: 0.98;
+}
+
+/* Fallback simple keyframes if not present in global CSS */
+@keyframes gflash {
+  0%   { transform: translateX(-12%); opacity: 0.85; }
+  50%  { transform: translateX(12%);  opacity: 1; }
+  100% { transform: translateX(-12%); opacity: 0.85; }
+}
+
+/* --- NEW: brown felt for the gameboard (and matching bet spot) --- */
+.table-surface {
+  background: radial-gradient(60% 60% at 50% 10%, #2b0d34 0%, #14081a 50%, #000 100%) !important;
+  border-radius: 12px;
+  box-shadow: inset 0 2px 8px rgba(0,0,0,.45), 0 8px 40px rgba(0,0,0,.6);
+  /* keep card canvas visible above the felt */
+  position: relative;
+  overflow: visible;
+}
+
+/* small felt panels like the bet-spot should match the brown theme */
+.bet-spot-felt {
+  background: linear-gradient(180deg, rgba(11,18,32,0.72) 0%, rgba(8,10,16,0.85) 100%) !important;
+  border: 1px solid rgba(255,255,255,0.02);
+  box-shadow: inset 0 3px 8px rgba(0,0,0,.5);
+  color: #cfe3ff;
+}
+
+/* HUD */
+/* stick the HUD just under the navbar so it never overlaps and keeps consistent spacing */
+.war-hud {
+  display:flex;
+  justify-content:space-between;
+  align-items:center;
+  gap:.75rem;
+  padding:.6rem .8rem;
+  background: linear-gradient(120deg,#6d28d9,#2563eb,#06b6d4);
+  box-shadow: 0 .6rem 1.2rem rgba(0,0,0,.25);
+  position: sticky;
+  top: calc(var(--nav-height, 64px) + 8px);
+  z-index: 1000;
+}
+.war-hud .hud-chip { display:inline-flex; align-items:center; gap:.4rem; background: rgba(255,255,255,.16); padding:.28rem .55rem; border-radius:999px; font-weight:800; }
+.btn-join, .btn-leave { border:0; padding:.45rem .75rem; border-radius:.6rem; font-weight:800; color:#0b1220; background:#fff; cursor:pointer; }
+.btn-leave { background:transparent; color:#fff; border:1px solid rgba(255,255,255,.3); }
+
+/* Setup */
+.setup { display:grid; place-items:center; padding: 24px; }
+.setup-card { width:min(760px, 92vw); background:#0f172a; border:1px solid rgba(255,255,255,.08); border-radius:16px; box-shadow:0 1.2rem 2.4rem rgba(0,0,0,.35); padding:16px; }
+.setup-card h3 { margin:4px 0 12px; font-weight:900; }
+.row { display:grid; gap:6px; margin-bottom:12px; }
+.row label { font-weight:800; color:#cbd5e1; }
+.row input { background:#0b1220; border:1px solid rgba(255,255,255,.1); color:#fff; padding:.55rem .65rem; border-radius:.6rem; }
+.ava-row { display:flex; flex-wrap:wrap; gap:8px; }
+.ava-btn { width:44px; height:44px; border-radius:999px; border:1px solid rgba(255,255,255,.18); background:#0b1220; cursor:pointer; font-size:22px; }
+.ava-btn.is-active { outline:2px solid #22c55e; }
+.stake-input { display:flex; align-items:center; gap:6px; }
+.stake-input > span { background:#0b1220; border:1px solid rgba(255,255,255,.1); padding:.55rem .6rem; border-radius:.6rem; }
+.btn-join.wide { width:100%; margin-top:8px; }
+
+/* Matchmaking */
+.match-overlay { position:fixed; inset:0; display:grid; place-items:center; background:rgba(9,12,18,.55); z-index:50; backdrop-filter:blur(2px); -webkit-backdrop-filter:blur(2px); }
+.match-card { width:min(860px,94vw); background:#0f172a; border:1px solid rgba(255,255,255,.08); border-radius:16px; overflow:hidden; box-shadow:0 1.25rem 2.5rem rgba(0,0,0,.35); }
+.match-header { display:flex; align-items:center; justify-content:space-between; padding:.8rem 1rem; color:#fff; background: linear-gradient(120deg,#6d28d9,#2563eb,#06b6d4); }
+.match-body { display:grid; grid-template-columns:1fr 40px 1fr; gap:0; padding:1rem; }
+.match-col { padding:.75rem; display:grid; align-content:center; gap:.75rem; text-align:center; }
+.match-divider { display:grid; place-items:center; color:#fff; font-weight:900; }
+.mm-avatar { display:grid; place-items:center; width:96px; height:96px; border-radius:999px; background:#0b1220; border:3px solid rgba(255,255,255,.4); margin:0 auto; }
+.mm-pill { display:inline-flex; align-items:center; gap:.4rem; padding:.28rem .55rem; border-radius:999px; background: rgba(255,255,255,.1); color:#fff; font-weight:800; }
+.mm-cancel { background:transparent; color:#fff; border:1px solid rgba(255,255,255,.3); padding:.45rem .8rem; border-radius:.6rem; font-weight:800; }
+.mm-footer { padding:.6rem .9rem; border-top:1px solid rgba(255,255,255,.08); }
+
+/* Table */
+.table-wrap { width: min(980px, 96vw); margin: 16px auto; display:grid; gap:14px; }
+.player-row { display:flex; align-items:center; justify-content:space-between; background:#0f172a; border:1px solid rgba(255,255,255,.08); border-radius:14px; padding:10px 12px; font-weight:800; }
+.player-row .score, .player-row .stake { opacity:.9; font-weight:700; }
+.ava { display:inline-grid; place-items:center; width:28px; height:28px; border-radius:50%; background:#0b1220; border:2px solid rgba(255,255,255,.4); box-shadow:0 6px 12px rgba(0,0,0,.35); }
+
+/* Cards row */
+.cards-row { display:grid; grid-template-columns:1fr minmax(160px, 200px) 1fr; align-items:center; gap:12px; }
+.vs-col { display:grid; place-items:center; gap:10px; }
+.round-banner { background:#16a34a; color:#052e16; font-weight:900; padding:.28rem .55rem; border-radius:999px; }
+.war-badge { background:#eab308; color:#422006; font-weight:900; padding:.28rem .55rem; border-radius:999px; }
+.btn-deal { border:0; background:#fff; color:#0b1220; padding:.55rem .9rem; border-radius:.8rem; font-weight:900; cursor:pointer; }
+.btn-deal:disabled { opacity:.55; cursor:not-allowed; }
+.end-row { display:grid; gap:8px; place-items:center; }
+.final-banner { font-weight:900; color:#fff; background:#10b981; padding:.4rem .7rem; border-radius:.8rem; }
+
+/* Card faces (Roll-of-Cards vibe) */
+.card-face { width:min(48vw, 220px); aspect-ratio: 5 / 7; border-radius:16px; background:#ffffff; color:#0b1220; display:grid; place-items:center; position:relative; box-shadow: 0 12px 28px rgba(0,0,0,.35); }
+.card-face.is-red { color:#b91c1c; }
+.card-face.is-empty { background:rgba(255,255,255,.06); border:1px dashed rgba(255,255,255,.25); color:#9ca3af; }
+.card-rank { position:absolute; top:8px; left:10px; font-size:clamp(16px, 5vw, 22px); font-weight:900; }
+.card-suit { font-size:clamp(48px, 12vw, 62px); transform: translateY(4px); }
+
+@media (max-width: 640px) {
+  .cards-row { grid-template-columns: 1fr; gap:12px; }
+  .vs-col { order:-1; }
+  .card-face { width:min(64vw, 260px); }
+}
+/* keep your existing rules; add/override below */
+
+.nav-spacer {
+  /* App.js sets --nav-height; fall back to 64px if not present */
+  height: calc(var(--nav-height, 64px));
+}
+
+/* Center deck */
+.center-stack { position: relative; width: 120px; height: 168px; }
+.deck-back {
+  position:absolute; inset:0;
+  background:#fff; border-radius:14px; box-shadow:0 10px 22px rgba(0,0,0,.35);
+  background-image: radial-gradient(#ddd 20%, transparent 21%), radial-gradient(#ddd 20%, transparent 21%);
+  background-position: 0 0, 10px 10px; background-size: 20px 20px;
+}
+.deck-back.shadow  { transform: translate(4px, -4px); opacity:.9; }
+.deck-back.shadow2 { transform: translate(8px, -8px); opacity:.8; }
+
+/* Fly cards */
+.fly-card {
+  position:absolute; width:120px; height:168px; border-radius:14px; background:#fff; color:#0b1220;
+  display:grid; place-items:center; box-shadow:0 14px 28px rgba(0,0,0,.45);
+  animation-duration: .55s; animation-fill-mode: forwards; z-index: 5;
+}
+.fly-card.is-red { color:#b91c1c; }
+.fly-card .card-rank { position:absolute; top:8px; left:10px; font-weight:900; }
+.fly-card .card-suit { font-size:42px; transform: translateY(4px); }
+
+@keyframes flyL { from { transform: translateX(0) scale(1); opacity: 0.95; } to { transform: translateX(-220px) rotate(-6deg); opacity: 1; } }
+@keyframes flyR { from { transform: translateX(0) scale(1); opacity: 0.95; } to { transform: translateX(220px) rotate(6deg);  opacity: 1; } }
+.fly-left  { animation-name: flyL; }
+.fly-right { animation-name: flyR; }
+
+/* Slots still use your card-face sizes */
+.card-face { width:min(48vw, 220px); aspect-ratio: 5/7; border-radius:16px; background:#ffffff; color:#0b1220; display:grid; place-items:center; position:relative; box-shadow: 0 12px 28px rgba(0,0,0,.35); }
+.card-face.is-red { color:#b91c1c; }
+.card-face.is-empty { background:rgba(255,255,255,.06); border:1px dashed rgba(255,255,255,.25); color:#9ca3af; }
+.card-rank { position:absolute; top:8px; left:10px; font-size:clamp(16px, 5vw, 22px); font-weight:900; }
+.card-suit { font-size:clamp(48px, 12vw, 62px); transform: translateY(4px); }
+
+@media (max-width: 640px) {
+  .center-stack { width: 96px; height: 134px; }
+  .fly-card { width:96px; height:134px; }
+  @keyframes flyL { from { transform: translateX(0) scale(1); opacity: 0.95; } to { transform: translateX(-160px) rotate(-6deg); opacity: 1; } }
+  @keyframes flyR { from { transform: translateX(0) scale(1); opacity: 0.95; } to { transform: translateX(160px) rotate(6deg);  opacity: 1; } }
+}
+.cards-3d-only,
+.cards-3d-only > div {
+  overflow: visible;
+}
+
+.table-wrap {
+  overflow: visible;
+}
+/* Center the 3D card scene and give it room */
+.cards-3d-only {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  padding: 8px 0;
+}
+
+/* The CardReveal root <div> (canvas wrapper) */
+.cards-3d-only > div {
+  width: 100%;
+  max-width: 980px;         /* adjust if you want it wider/narrower */
+  margin: 0 auto;
+}
+
+/* Make sure the table layout doesn’t squeeze the canvas */
+.table-wrap {
+  width: 100%;
+}
+/* Make the CardReveal wrapper an overlay anchor */
+.cards-3d-wrap {
+  position: relative;
+  width: 100%;
+  overflow: visible;
+}
+
+/* Label anchors (centered vertically on the canvas) */
+.landing {
+  position: absolute;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  pointer-events: none; /* don’t block the Deal button */
+}
+
+.landing-left  { left: var(--left-landing, 18%); }
+.landing-right { left: var(--right-landing, 82%); }
+
+/* Pretty glassy boxes */
+.landing-box {
+  pointer-events: none;
+  min-width: 110px;
+  padding: 8px 12px;
+  border-radius: 12px;
+  background: rgba(15, 23, 42, 0.65);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  box-shadow: 0 10px 28px rgba(0,0,0,.35), inset 0 1px 0 rgba(255,255,255,.06);
+  color: #e5e7eb;
+  text-align: center;
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+}
+
+.landing-title {
+  font-weight: 800;
+  letter-spacing: .25px;
+  line-height: 1.05;
+}
+
+.landing-sub {
+  font-size: .8rem;
+  color: #9fb1c6;
+  margin-top: 2px;
+}
+
+/* Keep canvas full width and visible */
+.cards-3d-only { width: 100%; max-width: none; overflow: visible; }
+.table-wrap { overflow: visible; }
+
+/* Small screens: slightly smaller labels */
+@media (max-width: 600px) {
+  .landing-box { min-width: 90px; padding: 6px 10px; border-radius: 10px; }
+  .landing-sub { font-size: .72rem; }
+}
+/* Anchor for overlaying labels over the 3D canvas */
+.cards-3d-wrap {
+  position: relative;
+  width: 100%;
+  overflow: visible;
+}
+
+/* Label anchors (centered vertically on the canvas) */
+.landing {
+  position: absolute;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+}
+
+.landing-left  { left: var(--left-landing, 18%); }
+.landing-right { left: var(--right-landing, 82%); }
+
+/* Glassy label boxes */
+.landing-box {
+  pointer-events: none;
+  min-width: 110px;
+  padding: 8px 12px;
+  border-radius: 12px;
+  background: rgba(15, 23, 42, 0.65);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  box-shadow: 0 10px 28px rgba(0,0,0,.35), inset 0 1px 0 rgba(255,255,255,.06);
+  color: #e5e7eb;
+  text-align: center;
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+}
+
+.landing-title {
+  font-weight: 800;
+  letter-spacing: .25px;
+  line-height: 1.05;
+}
+
+.landing-sub {
+  font-size: .8rem;
+  color: #9fb1c6;
+  margin-top: 2px;
+}
+
+/* Keep canvas full width and visible */
+.cards-3d-only { width: 100%; max-width: none; overflow: visible; }
+.table-wrap    { overflow: visible; }
+
+@media (max-width: 600px) {
+  .landing-box { min-width: 90px; padding: 6px 10px; border-radius: 10px; }
+  .landing-sub { font-size: .72rem; }
+}
+
+/* Inline LED anchored inside the game's table-surface.
+   Reverted to a calmer single-gradient run and slowed for a chill feel. */
+.led-inline {
+  position: absolute;
+  top: 6px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: min(84vw, 980px);
+  max-width: 980px;
+  height: 12px;
+  border-radius: 999px;
+  pointer-events: none;
+  z-index: 12000;
+  overflow: hidden;
+}
+
+/* Apply the same gentle animation to both inline rail and the app-level topbar */
+.led-inline .led-run,
+.led-topbar .led-run {
+  position: absolute;
+  inset: 0;
+  border-radius: 999px;
+
+  /* subtle, soft gradient that reads like a calm backlight */
+  background: linear-gradient(
+    90deg,
+    rgba(150,100,230,0.10) 0%,
+    rgba(200,150,255,0.14) 30%,
+    rgba(120,210,200,0.10) 60%,
+    rgba(150,100,230,0.10) 100%
+  );
+
+  /* softer glow */
+  box-shadow: 0 6px 18px rgba(130, 80, 220, 0.06), inset 0 1px 6px rgba(255,255,255,0.02);
+  filter: blur(0.9px) saturate(1.02);
+  opacity: 0.95;
+
+  /* calm motion: long default duration, ease-in-out, tiny background sweep */
+  animation: led-chill var(--led-duration, 24s) ease-in-out infinite;
+  will-change: transform, background-position, opacity;
+  transform: translateZ(0);
+}
+
+/* Slow, subtle sweep with slight breathing (opacity) and tiny horizontal motion */
+@keyframes led-chill {
+  0% {
+    background-position: 0% 50%;
+    transform: translateY(0);
+    opacity: 0.92;
+    box-shadow: 0 6px 18px rgba(130, 80, 220, 0.05);
   }
-  
-  .game-container {
-	text-align: center;
-	background-color: white;
-	padding: 20px;
-	border-radius: 10px;
-	box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
-	margin: 20px;
+  50% {
+    background-position: -20% 50%;
+    transform: translateY(-1px);
+    opacity: 1;
+    box-shadow: 0 8px 22px rgba(130, 80, 220, 0.07);
   }
-  
-  .card-display {
-	margin: 10px;
-	padding: 10px;
-	border: 1px solid #ddd;
-	border-radius: 8px;
-	display: inline-block;
-	min-width: 100px;
+  100% {
+    background-position: -40% 50%;
+    transform: translateY(0);
+    opacity: 0.92;
+    box-shadow: 0 6px 18px rgba(130, 80, 220, 0.05);
   }
-  
-  .card-display div {
-	font-size: 200px;
-	margin-top: 5px;
-  }
-  
-  .scoreboard {
-	margin-top: 20px;
-  }
-  
-  button {
-	background-color: #007bff;
-	color: white;
-	border: none;
-	padding: 10px 20px;
-	border-radius: 5px;
-	cursor: pointer;
-	font-size: 16px;
-	margin-top: 20px;
-  }
-  
-  button:disabled {
-	background-color: #cccccc;
-	cursor: not-allowed;
-  }
-  
-  button:hover:not(:disabled) {
-	background-color: #0056b3;
-  }
-  
+}
+
+/* fallback small topbar placement (unchanged) */
+.led-topbar {
+  position: fixed;
+  left: 50%;
+  transform: translateX(-50%);
+  top: calc(var(--nav-height, 64px));
+  width: min(84vw, 980px);
+  max-width: 980px;
+  height: 10px;
+  border-radius: 999px;
+  pointer-events: none;
+  z-index: 11000 !important;
+  display: block;
+}

@@ -1,158 +1,1409 @@
-/* Styling for the jackpot description */
-.jackpot-description {
-	padding: 16px;
-	background: #4caf50; /* Background color for the jackpot description */
-	color: #fff; /* Text color for the jackpot description */
-	text-align: center;
-	font-weight: bold;
-	font-size: 24px;
-	margin-bottom: 16px;
-	border: 2px solid #388e3c; /* Border color for the jackpot description */
-	border-radius: 10px; /* Border radius for the jackpot description */
+/* --- INSERT / ADJUST: overrides for dark backdrop, nav gap, LED and chip halo thickness --- */
+
+html, body, #root {
+  /* Force dark background regardless of other styles that might set white */
+  background: radial-gradient(60% 80% at 50% 10%, #3b1d55 0%, #140a1c 55%, #0a0613 75%, #000 100%) !important;
+  background-attachment: fixed !important;
+  color: #fff !important;
+  min-height: 100%;
+}
+
+/* small spacer so board sits slightly below nav bar */
+.app-nav-spacer {
+  height: 8px !important;
+  min-height: 8px !important;
+}
+
+/* --- Insert: shared LED rail + footer for RollofCards page --- */
+:root { --nav-height: 64px; }
+
+.led-topbar {
+  position: fixed !important;
+  top: calc(var(--nav-height, 64px) + 8px) !important;
+  left: 0 !important;
+  width: 100vw !important;
+  height: 12px !important;
+  pointer-events: none !important;
+  z-index: 100000 !important;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: visible !important;
+  background: transparent !important;
+}
+.led-run {
+  --led-color: rgba(255,110,220,0.95);
+  --led-speed: 5s;
+  position: relative;
+  width: 120vw;
+  height: 8px;
+  margin-left: -10vw;
+  border-radius: 999px;
+  background:
+    linear-gradient(90deg, rgba(0,0,0,0) 0%, rgba(255,255,255,0.02) 18%, var(--led-color) 46%, rgba(255,255,255,0.02) 54%, rgba(0,0,0,0) 100%),
+    linear-gradient(180deg, rgba(255,255,255,0.01), rgba(255,255,255,0));
+  background-size: 300% 100%, 100% 100%;
+  filter: blur(5px) saturate(1.05);
+  opacity: 0.98;
+  mix-blend-mode: screen;
+  z-index: 100000 !important;
+  animation: led-bg-move var(--led-speed) linear infinite, led-pulse calc(var(--led-speed) * 2) ease-in-out infinite;
+}
+.led-run::before {
+  content: "";
+  position: absolute;
+  left: -50%;
+  top: -120%;
+  width: 36%;
+  height: 360%;
+  transform: skewX(-18deg);
+  background: linear-gradient(90deg, rgba(255,255,255,0) 0%, rgba(255,255,255,0.55) 45%, rgba(255,255,255,0) 100%);
+  filter: blur(8px) saturate(1.15);
+  opacity: 0.95;
+  mix-blend-mode: screen;
+  border-radius: 6px;
+  animation: led-sweep calc(var(--led-speed) * 1.05) cubic-bezier(.2,.8,.2,1) infinite;
+  pointer-events: none;
+}
+@keyframes led-bg-move {
+  0%   { background-position: 0% 50%, 0% 0%; }
+  35%  { background-position: 60% 50%, 0% 0%; }
+  70%  { background-position: 120% 50%, 0% 0%; }
+  100% { background-position: 240% 50%, 0% 0%; }
+}
+@keyframes led-sweep {
+  0%   { left: -50%; opacity: 0; transform: skewX(-18deg) translateX(0); }
+  20%  { left: -10%; opacity: 0.95; transform: skewX(-18deg) translateX(6%); }
+  50%  { left: 40%;  opacity: 0.85; transform: skewX(-18deg) translateX(10%); }
+  80%  { left: 110%; opacity: 0.4; transform: skewX(-18deg) translateX(18%); }
+  100% { left: 170%; opacity: 0; transform: skewX(-18deg) translateX(20%); }
+}
+@keyframes led-pulse {
+  0%   { transform: scaleY(0.985); opacity: 0.92; }
+  50%  { transform: scaleY(1.03);  opacity: 1;    }
+  100% { transform: scaleY(0.985); opacity: 0.92; }
+}
+
+/* Footer (page-level fallback; matches App theme) */
+.theme-footer {
+  position: fixed;
+  left: 0; right: 0; bottom: 0;
+  height: 52px;
+  display: flex; align-items: center; justify-content: center;
+  z-index: 4200;
+  background: linear-gradient(180deg, rgba(20,12,27,0.96), rgba(8,6,12,0.98));
+  border-top: 1px solid rgba(255,110,220,0.05);
+  box-shadow: 0 -10px 30px rgba(99,64,255,0.04), inset 0 1px 0 rgba(255,255,255,0.01);
+  color: #cfe3ff; font-size: .9rem;
+  -webkit-backdrop-filter: blur(6px); backdrop-filter: blur(6px);
+}
+.theme-footer::before {
+  content: "";
+  position: absolute; left:0; right:0; top:-6px; height:6px;
+  background: linear-gradient(90deg, rgba(0,0,0,0) 0%, rgba(255,255,255,0.03) 20%, rgba(255,110,220,0.9) 48%, rgba(255,255,255,0.03) 56%, rgba(0,0,0,0) 100%);
+  background-size: 300% 100%; filter: blur(6px); mix-blend-mode: screen;
+  animation: led-bg-move 5s linear infinite; z-index:4201; pointer-events:none;
+}
+.theme-footer .theme-footer-inner { width: min(1180px,96%); display:flex; gap:12px; align-items:center; justify-content:space-between; padding:0 12px; }
+.theme-footer .text-link { color:#bfcff8; text-decoration:none; opacity:.95; margin: 0 6px; }
+.theme-footer .text-link:hover { color:#fff; text-decoration:underline; }
+
+/* make sure page content has safe padding for fixed footer */
+:root, html, body, #root { padding-bottom: 72px !important; }
+/* --- END INSERT --- */
+
+/* === Connect-Four style full-width LED topbar ===
+   - Multi-layer moving gradient (background) for continuous motion
+   - ::before sweeping bright highlight for the heavy "slide" effect
+   - subtle pulse + flicker for life
+   - full viewport width and high z-index so it's always visible
+*/
+.led-topbar {
+  position: fixed !important;
+  top: 64px !important; /* match Game.js offset */
+  left: 0 !important;
+  width: 100vw !important;
+  height: 14px !important; /* slightly thicker */
+  pointer-events: none !important;
+  z-index: 9999 !important;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: visible !important;
+  background: transparent !important;
+}
+
+/* the visible moving "rail" */
+.led-run {
+  --led-color: rgba(255,110,220,0.95);
+  --led-speed: 3s;
+  position: relative;
+  width: 120vw;              /* extend beyond viewport to avoid hard edges */
+  height: 8px;
+  margin-left: -10vw;
+  border-radius: 999px;
+  /* layered backgrounds: animated accent layer + subtle base sheen */
+  background:
+    linear-gradient(90deg,
+      rgba(0,0,0,0) 0%,
+      rgba(255,255,255,0.03) 18%,
+      var(--led-color) 46%,
+      rgba(255,255,255,0.03) 54%,
+      rgba(0,0,0,0) 100%),
+    linear-gradient(180deg, rgba(255,255,255,0.01), rgba(255,255,255,0));
+  background-size: 300% 100%, 100% 100%;
+  background-position: 0% 50%, 0% 0%;
+  filter: blur(5px) saturate(1.08);
+  opacity: 0.98;
+  mix-blend-mode: screen;
+  box-shadow: 0 10px 30px rgba(99,64,255,0.06), 0 2px 12px rgba(255,110,220,0.06);
+  animation:
+    led-bg-move var(--led-speed) linear infinite,
+    led-pulse calc(var(--led-speed) * 2) ease-in-out infinite;
+}
+
+/* sweeping bright highlight (the main Connect4-like sweep) */
+.led-run::before {
+  content: "";
+  position: absolute;
+  left: -50%;
+  top: -120%;
+  width: 36%;
+  height: 360%;
+  transform: skewX(-18deg);
+  background: linear-gradient(90deg,
+    rgba(255,255,255,0) 0%,
+    rgba(255,255,255,0.55) 45%,
+    rgba(255,255,255,0) 100%);
+  filter: blur(8px) saturate(1.15);
+  opacity: 0.95;
+  mix-blend-mode: screen;
+  border-radius: 6px;
+  animation: led-sweep calc(var(--led-speed) * 1.05) cubic-bezier(.2,.8,.2,1) infinite;
+  pointer-events: none;
+}
+
+/* soft sparkle layer to add texture (fades in/out) */
+.led-run::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: 999px;
+  background: radial-gradient(60% 60% at 20% 50%, rgba(255,255,255,0.02), rgba(255,255,255,0) 30%),
+              radial-gradient(60% 60% at 80% 50%, rgba(255,255,255,0.02), rgba(255,255,255,0) 30%);
+  opacity: 0.6;
+  mix-blend-mode: screen;
+  animation: led-texture 6s linear infinite;
+  pointer-events: none;
+}
+
+/* Animations */
+@keyframes led-bg-move {
+  0%   { background-position: 0% 50%, 0% 0%; }
+  35%  { background-position: 60% 50%, 0% 0%; }
+  70%  { background-position: 120% 50%, 0% 0%; }
+  100% { background-position: 240% 50%, 0% 0%; }
+}
+
+@keyframes led-sweep {
+  0%   { left: -50%; opacity: 0; transform: skewX(-18deg) translateX(0); }
+  20%  { left: -10%; opacity: 0.95; transform: skewX(-18deg) translateX(6%); }
+  50%  { left: 40%;  opacity: 0.85; transform: skewX(-18deg) translateX(10%); }
+  80%  { left: 110%; opacity: 0.4; transform: skewX(-18deg) translateX(18%); }
+  100% { left: 170%; opacity: 0; transform: skewX(-18deg) translateX(20%); }
+}
+
+@keyframes led-pulse {
+  0%   { transform: scaleY(0.985); opacity: 0.92; }
+  50%  { transform: scaleY(1.03);  opacity: 1;    }
+  100% { transform: scaleY(0.985); opacity: 0.92; }
+}
+
+@keyframes led-texture {
+  0%   { opacity: 0.55; transform: translateY(0); }
+  50%  { opacity: 0.7;  transform: translateY(-1px); }
+  100% { opacity: 0.55; transform: translateY(0); }
+}
+
+/* Remove old/contradictory rules in this file that set body/background to white, or that constrain .led-topbar width or make .app-nav-spacer large.
+   Search for and delete/comment:
+   - any "body { background: white; }"
+   - any ".app-nav-spacer { height: 56px; }"
+   - any ".led-topbar { width: 80%; left: 10%; }" or "position: sticky"
+   - any ".poker-table .table-surface { background: white }"
+*/
+
+html, body {
+  min-height: 100%;
+  margin: 0;
+  background: linear-gradient(135deg, #0f172a, #1e293b);
+  color: #f0e7e2;
+  font-family: 'Inter', system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, 'Helvetica Neue', Arial, 'Apple Color Emoji', 'Segoe UI Emoji', 'Segoe UI Symbol';
+}
+
+:root{
+  --ease-out-quint: cubic-bezier(.23,1,.32,1);
+  --ease-out: cubic-bezier(.22,.8,.22,1);
+  --card-in-ms: 900ms;
+  --dice-in-ms: 1100ms;
+
+  --felt: #0a6a2f;
+  --felt-hi: #0c7a35;
+  --felt-lo: #075a28;
+  --rim-a: #3a2b1a;
+  --rim-b: #2b1f13;
+  --rim-c: #1f150c;
+
+  --gold: #fcd34d;
+  --muted: #94a3b8;
+}
+
+/* Reduce motion accessibility */
+@media (prefers-reduced-motion: reduce){
+  * { animation: none !important; transition: none !important; }
+}
+
+.small-muted { color: var(--muted); font-size: .875rem; }
+
+/* ===== HUD bar ===== */
+.hud-bar{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:12px;
+  padding:12px 16px;
+  margin-bottom:16px;
+  border:1px solid rgba(255,255,255,.08);
+  border-radius:14px;
+  background:linear-gradient(180deg, rgba(0,0,0,.24), rgba(0,0,0,.12));
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.06);
+}
+.hud-left{ display:flex; align-items:center; gap:22px; flex-wrap:wrap; }
+.stat{ display:flex; align-items:center; gap:10px; }
+.stat-label{ font-size:.85rem; color:var(--muted); }
+.stat-value{ font-weight:800; letter-spacing:.2px; }
+.stat-chip{
+  font-weight:700;
+  padding:4px 10px;
+  border-radius:10px;
+  background:rgba(250,204,21,.12);
+  border:1px solid rgba(250,204,21,.38);
+}
+.delta-badge{
+  font-size:.78rem;
+  padding:3px 8px;
+  border-radius:999px;
+  border:1px solid rgba(255,255,255,.2);
+  background:rgba(255,255,255,.06);
+}
+.delta-badge.green{ color:#059669; border-color:rgba(34,197,94,.35); background:rgba(34,197,94,.12); }
+.delta-badge.red{ color:#DC2626; border-color:rgba(239,68,68,.35); background:rgba(239,68,68,.12); }
+.hud-right .wallet-btn{ font-weight:700; }
+
+/* ===== Poker table visuals ===== */
+.poker-table { position: relative; width: 100%; margin: 0 auto; }
+
+.table-rim {
+  background: radial-gradient(circle at 50% 50%, var(--rim-a) 0%, var(--rim-b) 60%, var(--rim-c) 100%);
+  border-radius: 24px;
+  padding: 14px;
+  box-shadow: 0 20px 50px rgba(0,0,0,.45), inset 0 2px 0 rgba(255,255,255,.06);
+}
+
+.table-surface {
+  background: radial-gradient(ellipse at 50% 40%, var(--felt-hi) 0%, var(--felt) 45%, var(--felt-lo) 100%);
+  border-radius: 18px;
+  padding: clamp(10px, 2vw, 18px);
+  box-shadow: inset 0 20px 60px rgba(0,0,0,.35), inset 0 -10px 30px rgba(0,0,0,.25);
+  transform-style: preserve-3d;
+  perspective: 900px;
+  perspective-origin: 50% 30%;
+}
+
+.table-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr; /* left: cards, right: dice */
+  gap: clamp(10px, 2.5vw, 24px);
+  align-items: start;
+}
+
+/* Prevent any default panels behind cards/dice */
+.cards-container,
+.dice-container {
+  background: transparent !important;
+  border: none !important;
+  box-shadow: none !important;
+}
+
+/* ===== Cards layout: fixed two slots (prevents "hop") ===== */
+.cards-container {
+  display: grid !important;
+  grid-template-columns: repeat(2, minmax(120px, 1fr));
+  gap: 12px;
+  justify-items: center;
+  align-items: center;
+  min-height: clamp(90px, 10vw, 160px);
+}
+
+/* ===== Card / Dice glyph wrappers ===== */
+.card-item,
+.dice-item {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent !important;
+  border: none !important;
+  box-shadow: none !important;
+  width: fit-content;
+  max-width: max-content;
+  line-height: 1;
+  padding: 0;
+  will-change: transform, opacity;
+  backface-visibility: hidden;
+  transform: translate3d(0,0,0);
+}
+
+.card-item > *,
+.dice-item > * {
+  margin: 0 !important;
+  padding: 0 !important;
+  line-height: 1 !important;
+  display: block;
+}
+
+/* scale the glyphs; dice can be overridden via component props */
+.card-item { font-size: clamp(72px, 11vw, 140px); }
+.dice-item { font-size: clamp(60px, 10vw, 110px); }
+
+/* ===== Card Animations (smooth, GPU-only) ===== */
+.card-item.drawn { animation: cardDrop .45s var(--ease-out); }
+@keyframes cardDrop {
+  0%   { transform: translate3d(0,-24px,0) scale(.985); opacity: 0; }
+  70%  { transform: translate3d(0,2px,0)  scale(1.01);  opacity: 1; }
+  100% { transform: translate3d(0,0,0)    scale(1); }
+}
+
+/* Dealer-like smooth slide */
+.card-item.deal-in-slow {
+  animation: dealToFeltSmooth var(--card-in-ms) var(--ease-out-quint) both;
+  transform-origin: 50% 80%;
+  position: relative;
+}
+
+@keyframes dealToFeltSmooth {
+  0%   { transform: translate3d(-120px, -120px, 0) rotate(-10deg) scale(.985); opacity: 0; }
+  55%  { transform: translate3d(-10px,   -6px,  0) rotate(-2deg)  scale(1.015); opacity: 1; }
+  82%  { transform: translate3d(-3px,    -1px,  0) rotate(-.5deg) scale(1.004); }
+  100% { transform: translate3d(0,0,0)               rotate(0deg)   scale(1); }
+}
+
+/* Soft shadow under card */
+.card-item.deal-in-slow::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  bottom: -6px;
+  transform: translateX(-50%) translateZ(0);
+  width: 70%;
+  height: 10px;
+  border-radius: 50%;
+  background: radial-gradient(ellipse at center, rgba(0,0,0,.35), rgba(0,0,0,0) 70%);
+  opacity: 0;
+  will-change: opacity, transform;
+  animation: cardShadowSmooth var(--card-in-ms) var(--ease-out) both;
+  pointer-events: none;
+}
+
+@keyframes cardShadowSmooth {
+  0%   { opacity: 0;   transform: translateX(-50%) translateZ(0) scaleX(.85); }
+  55%  { opacity: .55; transform: translateX(-50%) translateZ(0) scaleX(1.05); }
+  100% { opacity: .42; transform: translateX(-50%) translateZ(0) scaleX(1.00); }
+}
+
+/* ===== Dice: damped, fewer keyframes ===== */
+.dice-item.drop-roll-multi {
+  position: relative;
+  filter: drop-shadow(0 8px 18px rgba(0,0,0,.4));
+  animation: diceDropDamped var(--dice-in-ms) var(--ease-out) both;
+  transform-origin: 50% 90%;
+}
+
+@keyframes diceDropDamped {
+  0%   { transform: translate3d(0,-220px,0) rotate(-60deg) scale(0.98); opacity: 0; }
+  28%  { transform: translate3d(0,0,0)      rotate(18deg)   scale(1.04); opacity: 1; } /* impact */
+  48%  { transform: translate3d(0,-32px,0)  rotate(6deg)    scale(0.995); }
+  62%  { transform: translate3d(0,0,0)      rotate(3deg)    scale(1.01); }
+  78%  { transform: translate3d(0,-14px,0)  rotate(-2deg)   scale(1.002); }
+  100% { transform: translate3d(0,0,0)      rotate(0deg)    scale(1); }
+}
+
+/* Dice shadow */
+.dice-item.drop-roll-multi::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  bottom: -10px;
+  transform: translateX(-50%) translateZ(0) scaleX(.8);
+  width: 64%;
+  height: 14px;
+  border-radius: 50%;
+  background: radial-gradient(ellipse at center, rgba(0,0,0,.42), rgba(0,0,0,0) 70%);
+  opacity: 0;
+  will-change: opacity, transform;
+  animation: diceShadowDamped var(--dice-in-ms) var(--ease-out) both;
+  pointer-events: none;
+}
+@keyframes diceShadowDamped {
+  0%   { opacity: 0;   transform: translateX(-50%) translateZ(0) scaleX(.7); }
+  28%  { opacity: .65; transform: translateX(-50%) translateZ(0) scaleX(1.25); }
+  62%  { opacity: .48; transform: translateX(-50%) translateZ(0) scaleX(1.05); }
+  100% { opacity: .40; transform: translateX(-50%) translateZ(0) scaleX(1.0); }
+}
+
+/* ===== Bottom controls ===== */
+.table-controls {
+  margin-top: clamp(12px, 2.5vw, 24px);
+  padding: clamp(10px, 1.8vw, 16px);
+  background: rgba(0,0,0,.18);
+  border: 1px solid rgba(255,255,255,.12);
+  border-radius: 14px;
+
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 10px;
+}
+.table-controls .wide { grid-column: span 3; }
+@media (max-width: 860px){
+  .table-controls{ grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .table-controls .wide { grid-column: span 2; }
+}
+
+/* ===== Chip tray ===== */
+.chip-tray-title{
+  font-size:.9rem;
+  color:var(--muted);
+  margin-bottom:6px;
+  letter-spacing:.2px;
+}
+.chip-row{ display:flex; flex-wrap:wrap; gap:10px; align-items:center; }
+
+.chip{
+  --ring:#e5e7eb;
+  --core:#d4d4d8;
+  --face:#f5f5f5;
+  position:relative;
+  width:54px; height:54px;
+  border:none;
+  background: radial-gradient(circle at 50% 50%, var(--face) 0%, var(--core) 48%, var(--face) 100%);
+  border-radius:999px;
+  box-shadow: 0 6px 16px rgba(0,0,0,.35), inset 0 2px 0 rgba(255,255,255,.8), inset 0 -2px 0 rgba(0,0,0,.1);
+  cursor:pointer;
+  transition: transform .12s var(--ease-out), box-shadow .12s var(--ease-out);
+  padding:0;
+}
+.chip:hover { transform: translateY(-2px); }
+.chip:active{ transform: translateY(0); }
+
+.chip::before{
+  /* alternating color wedges */
+  content:"";
+  position:absolute; inset:0;
+  border-radius:999px;
+  background:
+    conic-gradient(var(--ring) 0 18deg, transparent 18deg 36deg) 50% 50%/100% 100%,
+    conic-gradient(var(--ring) 0 18deg, transparent 18deg 36deg) 50% 50%/86% 86%;
+  -webkit-mask:
+    radial-gradient(circle at 50% 50%, transparent 32%, #000 32%),
+    radial-gradient(circle at 50% 50%, #000 66%, transparent 66%);
+  mask:
+    radial-gradient(circle at 50% 50%, transparent 32%, #000 32%),
+    radial-gradient(circle at 50% 50%, #000 66%, transparent 66%);
+  mix-blend-mode:multiply;
+  opacity:.9;
+}
+
+.chip-inner{
+  position:absolute;
+  inset:0;
+  display:grid;
+  place-items:center;
+  border-radius:999px;
+  font-weight:900;
+  text-shadow: 0 1px 0 rgba(255,255,255,.6), 0 2px 8px rgba(0,0,0,.4);
+}
+
+/* Denomination tinting */
+.chip[data-val="1"]    { --ring:#64748b; }
+.chip[data-val="5"]    { --ring:#3b82f6; }
+.chip[data-val="10"]   { --ring:#10b981; }
+.chip[data-val="25"]   { --ring:#22c55e; }
+.chip[data-val="50"]   { --ring:#eab308; }
+.chip[data-val="100"]  { --ring:#f97316; }
+.chip[data-val="250"]  { --ring:#ef4444; }
+.chip[data-val="500"]  { --ring:#a855f7; }
+.chip[data-val="1000"] { --ring:#e11d48; }
+
+.chip-text{ color:#111827; font-size:.95rem; }
+
+.chip-clear{ margin-left:2px; }
+
+.bet-readout{
+  margin-top:8px;
+  font-size:.95rem;
+}
+.bet-readout .bet-help{
+  margin-left:8px; color:var(--muted); font-size:.85rem;
+}
+
+/* ===== Wallet dialog ===== */
+.wallet-dialog .MuiDialogTitle-root{
+  padding: 12px 16px;
+  border-bottom: 1px solid rgba(255,255,255,.08);
+}
+.wallet-close{
+  position:absolute; right:8px; top:8px;
+}
+.wallet-controls{ margin-top: 4px; }
+.wallet-buttons{ display:flex; gap:8px; flex-wrap:wrap; }
+.wallet-mini-stats{
+  display:flex; gap:18px; margin-top:10px; flex-wrap:wrap;
+}
+.wallet-mini-stats .mini-label{
+  display:block; font-size:.8rem; color:var(--muted);
+}
+.wallet-mini-stats .mini-value{
+  display:block; font-weight:700;
+}
+
+/* ===== Responsive ===== */
+@media (max-width: 768px) {
+  .table-grid { grid-template-columns: 1fr; }
+}
+/* === Image-based poker chips (text over image) === */
+.chip.use-img{
+  /* keep size/shape/hover from your existing .chip, but replace face with your image */
+  background: none;                  /* kill the radial gradient */
+  background-image: var(--chip-img); /* set inline from React */
+  background-size: cover;
+  background-position: center;
+  background-repeat: no-repeat;
+
+  /* a touch of depth so it sits on the felt */
+  box-shadow: 0 8px 18px rgba(0,0,0,.35),
+              inset 0 1px 0 rgba(255,255,255,.35),
+              inset 0 -2px 0 rgba(0,0,0,.18);
+}
+
+/* remove the alternating wedge ring for image chips */
+.chip.use-img::before{
+  content: none;
+}
+
+/* make the inner wrapper just a centering layer, not a visual layer */
+.chip.use-img .chip-inner{
+  background: transparent !important;
+  box-shadow: none !important;
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  border-radius: 999px;
+  pointer-events: none; /* clicks go to the button */
+}
+
+/* denomination text sits above the image */
+.chip.use-img .chip-text{
+  position: relative;
+  z-index: 2;
+  font-weight: 900;
+  font-size: .95rem;
+  color: #ffffff; /* tweak for your artwork */
+  text-shadow: 0 2px 4px rgba(0,0,0,.6), 0 0 1px rgba(0,0,0,.8);
+  line-height: 1;
+  user-select: none;
+}
+/* Ensure the table surface acts as a positioning context */
+.table-surface {
+  position: relative; /* required for absolute centering of the toast */
+}
+
+/* ===== Fancy Centered Win/Loss toast over the table ===== */
+.result-toast.fancy {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+
+  /* layout */
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+
+  /* glass + gradient border */
+  padding: 14px 18px;
+  border-radius: 16px;
+  background: linear-gradient( to bottom right, rgba(24,24,24,0.80), rgba(18,18,18,0.78) );
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+
+  border: 1px solid rgba(255,255,255,0.12);
+  box-shadow:
+    0 10px 30px rgba(0,0,0,.40),
+    0 0 0 1px rgba(255,255,255,0.05) inset;
+
+  pointer-events: none; /* ignore clicks */
+  z-index: 60; /* above cards/dice */
+
+  animation: toast-pop-center 5.0s ease forwards;
+}
+
+.result-toast.fancy.win  { --toast-accent: #10b981; } /* emerald-500 */
+.result-toast.fancy.loss { --toast-accent: #f43f5e; } /* rose-500 */
+
+/* subtle outer glow */
+.result-toast .toast-glow {
+  position: absolute;
+  inset: -6px;
+  border-radius: 18px;
+  background: radial-gradient( 60% 60% at 50% 50%, color-mix(in oklab, var(--toast-accent) 40%, transparent) 0%, transparent 70% );
+  filter: blur(8px);
+  opacity: 0.55;
+  z-index: -1;
+  pointer-events: none;
+}
+
+/* shine sweep */
+.result-toast .toast-shine {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(120deg, transparent 0%, rgba(255,255,255,0.18) 20%, transparent 40%);
+  border-radius: 16px;
+  mix-blend-mode: screen;
+  opacity: 0;
+  animation: shine-sweep 1.2s ease 0.25s forwards;
+  pointer-events: none;
+}
+
+/* sparkles (CSS-only confetti-ish dust) */
+.result-toast .toast-sparkles {
+  position: absolute;
+  width: 160px;
+  height: 160px;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -60%);
+  background:
+    radial-gradient(2px 2px at 10% 30%, color-mix(in oklab, var(--toast-accent) 80%, white 20%) 99%, transparent 100%),
+    radial-gradient(2px 2px at 80% 70%, color-mix(in oklab, var(--toast-accent) 80%, white 20%) 99%, transparent 100%),
+    radial-gradient(2px 2px at 60% 20%, color-mix(in oklab, var(--toast-accent) 80%, white 20%) 99%, transparent 100%),
+    radial-gradient(2px 2px at 30% 80%, color-mix(in oklab, var(--toast-accent) 80%, white 20%) 99%, transparent 100%);
+  filter: drop-shadow(0 0 4px rgba(255,255,255,.25));
+  opacity: 0;
+  animation: sparkles-pop 1.2s ease 0.12s forwards;
+  pointer-events: none;
+}
+
+/* inner layout */
+.toast-inner {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.toast-ico {
+  font-size: 28px !important;
+  width: 28px !important;
+  height: 28px !important;
+  flex: 0 0 28px;
+  filter: drop-shadow(0 2px 6px rgba(0,0,0,.4));
+}
+
+.ico-win    { color: #10b981; } /* emerald */
+.ico-loss   { color: #f43f5e; } /* rose */
+.ico-jackpot{
+  color: #fbbf24; /* amber */
+  filter: drop-shadow(0 0 6px rgba(251,191,36,.55));
+}
+
+.toast-text {
+  display: grid;
+  gap: 2px;
+}
+
+.toast-title {
+  font-weight: 700;
+  letter-spacing: .2px;
+  font-size: 15px;
+  color: #fff;
+}
+
+.toast-amount {
+  font-weight: 800;
+  font-feature-settings: "tnum";
+  color: var(--toast-accent);
+  text-shadow: 0 1px 0 rgba(0,0,0,.25);
+}
+
+/* animations */
+@keyframes toast-pop-center {
+  0%   { opacity: 0; transform: translate(-50%, -46%) scale(.98); }
+  14%  { opacity: 1; transform: translate(-50%, -50%) scale(1.00); }
+  84%  { opacity: 1; transform: translate(-50%, -50%) scale(1.00); }
+  100% { opacity: 0; transform: translate(-50%, -54%) scale(.98); }
+}
+
+@keyframes shine-sweep {
+  0%   { opacity: 0; transform: translateX(-40%); }
+  30%  { opacity: .65; }
+  100% { opacity: 0; transform: translateX(40%); }
+}
+
+@keyframes sparkles-pop {
+  0%   { opacity: 0; transform: translate(-50%, -60%) scale(.85); }
+  20%  { opacity: .9; }
+  100% { opacity: 0; transform: translate(-50%, -62%) scale(1.10); }
+}
+
+/* mobile tweak */
+@media (max-width: 520px) {
+  .result-toast.fancy { padding: 12px 14px; border-radius: 14px; }
+  .toast-title { font-size: 14px; }
+  .toast-amount { font-size: 14px; }
+}
+/* Force the toast to stay fully visible until JS hides it */
+.result-toast.fancy {
+  animation: none !important;
+  opacity: 1 !important;
+}
+/* Smaller overall footprint */
+.bet-spot {
+  display: flex;
+  justify-content: center;
+  margin-top: 8px;
+  margin-bottom: 6px;
+}
+
+.bet-spot-felt {
+  position: relative;
+  min-width: 180px;       /* was 260px */
+  min-height: 68px;       /* was 92px */
+  border-radius: 999px;
+  padding: 8px 12px 10px; /* tighter padding */
+  background: radial-gradient(ellipse at center, rgba(0,0,0,0.22), rgba(0,0,0,0.28)),
+              linear-gradient(180deg, rgba(10,77,10,0.85), rgba(7,60,7,0.85));
+  box-shadow: inset 0 2px 5px rgba(255,255,255,0.05),
+              inset 0 -2px 8px rgba(0,0,0,0.33),
+              0 4px 12px rgba(0,0,0,0.22);
+}
+
+.bet-spot-label {
+  font-size: 10px;        /* was 12px */
+  letter-spacing: .06em;
+  text-transform: uppercase;
+  color: rgba(255,255,255,0.78);
+  margin-bottom: 4px;
+  text-align: center;
+}
+
+/* shorter stack area */
+.bet-spot-stack {
+  position: relative;
+  height: 40px;           /* was 52px */
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* smaller chips */
+.bet-spot-chip {
+  position: absolute;
+  user-select: none;
+  pointer-events: none;
+  filter: drop-shadow(0 2px 3px rgba(0,0,0,0.35));
+  animation: bet-chip-in 110ms ease-out;
+}
+
+/* small size variant (32px) */
+.bet-spot-chip--sm { width: 32px; height: 32px; }
+
+@keyframes bet-chip-in {
+  from { transform: translate(0, 10px) scale(0.95); opacity: 0; }
+  to   { transform: translate(0, 0)    scale(1);    opacity: 1; }
+}
+
+.bet-spot-total {
+  margin-top: 0;
+  text-align: center;
+  font-weight: 700;
+  font-size: 12px;        /* smaller number */
+  color: #fff;
+  text-shadow: 0 1px 0 rgba(0,0,0,0.55);
+}
+
+/* super-compact on small screens */
+@media (max-width: 480px) {
+  .bet-spot-felt { min-width: 150px; min-height: 60px; padding: 6px 10px 8px; }
+  .bet-spot-stack { height: 34px; }
+  .bet-spot-chip--sm { width: 28px; height: 28px; }
+  .bet-spot-total { font-size: 11px; }
+  .bet-spot-label { font-size: 9px; }
+}
+/* ===== Phone-only scrollable chip tray (Bootstrap xs < 576px) ===== */
+:root { --tray-side-pad: 10px; }
+
+@media (max-width: 575.98px) {
+  /* make the tray full-bleed on the felt */
+  .chip-tray.wide { padding-top: 4px; }
+
+  .chip-scroller{
+    position: relative;
+    margin-left: calc(-1 * var(--tray-side-pad));
+    margin-right: calc(-1 * var(--tray-side-pad));
+    padding: 0 var(--tray-side-pad) 6px;
+    overflow-x: auto;
+    overflow-y: hidden;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: thin;
   }
-  
-  /* Styling for the dice character */
-  .jackpot-dice {
-	font-size: 50px; /* Adjust the font size for the dice character */
-	color: #000000;
+  .chip-scroller::-webkit-scrollbar{ height: 8px; }
+  .chip-scroller::-webkit-scrollbar-track{ background: rgba(255,255,255,.06); border-radius: 8px; }
+  .chip-scroller::-webkit-scrollbar-thumb{ background: rgba(255,255,255,.22); border-radius: 8px; }
+
+  .chip-strip{
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+    min-width: max-content;
+    padding: 2px 2px;
   }
-  
-  .jackpot-card {
-	font-size: 60px; /* Adjust the font size for the dice character */
-	margin-right: 8px; /* Add some spacing between the dice and text */
-	color: red;
+
+  /* edge fades to indicate scroll */
+  .chip-scroller::before,
+  .chip-scroller::after{
+    content: "";
+    position: absolute;
+    top: 0; bottom: 8px;
+    width: 44px;
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity .18s ease;
   }
-  
-  /* Styling for the result box */
-  .round-result-box {
-	width: 50%; /* You can change this value as needed */
-	max-width: 200px; /* Add a max-width to limit the width */
-	height: auto; /* Remove fixed height */
-	background-color: lightblue;
-	color: black;
-	padding: 5px;
-	border-radius: 5px;
-	text-align: center;
-	margin: 0 auto;
-	display: flex;
-	align-items: center; /* Vertically center the content */
-	justify-content: center; /* Horizontally center the content */
-	flex-direction: column; /* Stack children vertically */
+  .chip-scroller::before{
+    left: 0;
+    background: linear-gradient(90deg, rgba(0,0,0,.45), rgba(0,0,0,0));
   }
-  
-  /* Styling for the balance box */
-  .balance-box {
-	width: 50%; /* You can change this value as needed */
-	max-width: 200px; /* Add a max-width to limit the width */
-	height: auto; /* Remove fixed height */
-	background-color: lightgreen;
-	color: black;
-	padding: 5px;
-	border-radius: 5px;
-	text-align: center;
-	margin: 0 auto;
-	display: flex;
-	align-items: center;
-	justify-content: center;
-	flex-direction: column; /* Stack children vertically */
+  .chip-scroller::after{
+    right: 0;
+    background: linear-gradient(-90deg, rgba(0,0,0,.45), rgba(0,0,0,0));
   }
-  
-  /* Add margin to the results label */
-  .results-label {
-	margin-bottom: 5px; /* Add some spacing between label and result */
-	font-weight: bold; /* Make the label bold */
-	font-size: 50px; /* Adjust the font size as needed */
-	color: #333; /* Change the label text color as needed */
+  .chip-scroller.can-left::before{ opacity: 1; }
+  .chip-scroller.can-right::after{ opacity: 1; }
+
+  /* nudge buttons */
+  .chip-nudge{
+    position: absolute;
+    top: 50%;
+    transform: translateY(-50%);
+    height: 28px; width: 28px;
+    border-radius: 999px;
+    border: 1px solid rgba(255,255,255,.25);
+    background: rgba(0,0,0,.45);
+    color: #fff;
+    font-weight: 700;
+    line-height: 1;
+    display: grid;
+    place-items: center;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity .18s ease, background .12s ease, border-color .12s ease;
   }
-  
-  /* Remove border and make the container size match the cards */
-  .cards-container .card {
-	border: none;
+  .chip-nudge.left{ left: 6px; }
+  .chip-nudge.right{ right: 6px; }
+  .chip-nudge.show{ opacity: .95; pointer-events: auto; }
+  .chip-nudge:active{ background: rgba(0,0,0,.6); border-color: rgba(255,255,255,.35); }
+
+  /* slightly smaller chips on phones so they don’t feel cramped */
+  .chip.use-img{ width: 48px; height: 48px; }
+  .chip-text{ font-size: .85rem; }
+  .chip-clear { white-space: nowrap; }
+}
+
+/* === LAYOUT FIXES: full-bleed, no horizontal overflow === */
+
+/* Contain widths so nothing spills past the viewport */
+.poker-table { width: 100%; margin: 0 auto; overflow: hidden; }
+.table-rim, .table-surface { max-width: 100%; overflow: hidden; }
+
+/* Ensure the page never scrolls sideways */
+html, body { overflow-x: hidden; }
+
+/* Compact HUD & tighter components on small screens */
+@media (max-width: 600px) {
+  .hud-bar {
+    padding: 6px 10px;
+    margin-bottom: 8px;
+    flex-wrap: wrap;
+    gap: 8px;
   }
-  
-  .game-container {
-	display: flex;
-	justify-content: center;
-	align-items: center;
-	flex-wrap: wrap;
-	gap: 20px;
-	background-color: #f4f4f4;
+  .hud-bar .stat-label { font-size: 0.7rem; }
+  .hud-bar .stat-value,
+  .hud-bar .stat-chip { font-size: 0.85rem; }
+  .hud-right .wallet-btn { padding: 2px 8px; font-size: 0.75rem; }
+
+  .table-rim { padding: 8px; border-radius: 12px; }
+  .table-surface { padding: 8px; border-radius: 10px; }
+
+  .cards-container { min-height: 70px; gap: 6px; }
+  .card-item { font-size: clamp(54px, 9vw, 100px); }
+  .dice-item { font-size: clamp(48px, 8vw, 90px); }
+
+  .bet-spot-felt {
+    min-width: 140px;
+    min-height: 52px;
+    padding: 4px 8px 6px;
   }
-  
-  .coin-display {
-	background-color: #f4f4f4;
-	border: 1px solid #ddd;
-	padding: 20px;
-	border-radius: 8px;
-	box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+  .bet-spot-stack { height: 30px; }
+}
+
+/* Robust box-sizing so padding never causes >100% widths */
+*, *::before, *::after { box-sizing: border-box; }
+
+/* Kill Bootstrap row gutters inside the felt so nothing overflows horizontally */
+.poker-table .row {
+  --bs-gutter-x: 0;
+  margin-left: 0 !important;
+  margin-right: 0 !important;
+}
+.poker-table [class^="col-"],
+.poker-table [class*=" col-"],
+.poker-table .col {
+  padding-left: 0 !important;
+  padding-right: 0 !important;
+}
+
+/* === True full-bleed wrapper === */
+.fullbleed {
+  position: relative;
+  left: 50%;
+  right: 50%;
+  margin-left: -50vw;
+  margin-right: -50vw;
+  width: 100vw;                 /* force to viewport width */
+}
+
+.fullbleed .poker-table {
+  width: 100%;
+  margin: 0;
+}
+
+@media (min-width: 601px) {
+  /* disable full-bleed trick on larger screens to keep nice margins */
+  .fullbleed {
+    left: auto;
+    right: auto;
+    margin-left: 0;
+    margin-right: 0;
+    width: auto;
   }
-  
-  button {
-	background-color: #007bff;
-	color: #fff;
-	font-size: 24px; /* Increase the font size for buttons */
-	padding: 15px 30px; /* Adjust button padding */
-	border: none;
-	border-radius: 4px;
-	cursor: pointer;
-	margin-top: 20px; /* Increase the margin-top for buttons */
-	transition: background-color 0.2s;
+}
+
+/* On very small screens, remove heavy rounding so the felt reaches edges cleanly */
+@media (max-width: 600px) {
+  .table-rim { border-radius: 0; padding-left: 8px; padding-right: 8px; }
+  .table-surface { border-radius: 0; }
+}
+.cards-zone { overflow: visible; }
+/* Login overlay that blocks the table when logged out */
+.login-overlay {
+  position: absolute;
+  inset: 0;
+  background: rgba(10,12,16,0.55);
+  backdrop-filter: blur(4px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 50;
+}
+.login-overlay .overlay-card {
+  background: #0f172a;
+  color: #fff;
+  padding: 18px 22px;
+  border-radius: 10px;
+  box-shadow: 0 10px 25px rgba(0,0,0,.35);
+}
+/* Dark wallet modal */
+.wallet-dark .modal-content {
+  background: #12171d;
+  color: #e7efff;
+  border: 1px solid #1f2a36;
+}
+.wallet-dark .modal-header,
+.wallet-dark .modal-footer {
+  border-color: #1f2a36;
+}
+.wallet-dark .btn-outline-light {
+  border-color: #7f9bb9;
+  color: #e7efff;
+}
+.wallet-dark .btn-outline-light:hover,
+.wallet-dark .btn-outline-light:focus {
+  background: #e7efff;
+  color: #0b1220;
+  border-color: #e7efff;
+}
+
+/* Solid buttons for contrast */
+.wallet-dark .btn-primary { background:#3b82f6; border-color:#3b82f6; }
+.wallet-dark .btn-primary:hover { filter: brightness(1.05); }
+.wallet-dark .btn-success { background:#22c55e; border-color:#22c55e; }
+.wallet-dark .btn-info { background:#06b6d4; border-color:#06b6d4; }
+
+/* Inputs on dark */
+.wallet-dark .wallet-input.form-control {
+  background: #0b1220;
+  color: #e7efff;
+  border-color: #1f2a36;
+}
+.wallet-dark .wallet-input.form-control:focus {
+  background: #0b1220;
+  color: #fff;
+  border-color: #3b82f6;
+  box-shadow: 0 0 0 .2rem rgba(59,130,246,.25);
+}
+
+/* Close button contrast */
+.wallet-dark .btn-close {
+  filter: invert(1) grayscale(100%);
+}
+/* Position the balance stat as an anchor for the flyout */
+.stat-balance {
+  position: relative;
+}
+
+/* The small popup that drops from the Balance */
+.balance-fly {
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  /* Start directly under the number */
+  top: 100%;
+  margin-top: 2px;
+
+  font-size: 0.85rem;
+  line-height: 1.1;
+  white-space: nowrap;
+
+  padding: 2px 8px;
+  border-radius: 6px;
+  border: 1px solid rgba(255,255,255,0.15);
+  background: rgba(9, 14, 24, 0.9);
+  backdrop-filter: blur(2px);
+
+  pointer-events: none;
+  animation: flyDrop 1.5s ease-out forwards;
+  opacity: 0.95;
+  box-shadow: 0 4px 14px rgba(0,0,0,.35);
+}
+
+.balance-fly.win { border-color: rgba(34,197,94,.35); }
+.balance-fly.loss { border-color: rgba(239,68,68,.35); }
+
+.fly-line { display: inline-flex; align-items: baseline; gap: 6px; }
+.fly-line .plus, .fly-line .eq { opacity: .7; }
+
+.fly-line .pos { color: #3ee58e; font-weight: 600; }
+.fly-line .pos.total { text-shadow: 0 0 8px rgba(34,197,94,.25); }
+.fly-line .neg { color: #ff6b6b; font-weight: 600; }
+
+@keyframes flyDrop {
+  0%   { transform: translate(-50%, -8px); opacity: 0; }
+  20%  { transform: translate(-50%, 0px);  opacity: .95; }
+  100% { transform: translate(-50%, 28px); opacity: 0; }
+}
+/* remove the old right-side badge next to Balance */
+.delta-badge { display: none !important; }
+/* Balance flyout base */
+.stat-balance {
+  position: relative; /* ensure flyout anchors next to Balance */
+}
+.balance-fly {
+  position: absolute;
+  right: -6px;           /* nudge to the right of the balance value */
+  top: 50%;
+  transform: translateY(-50%);
+  font-size: 0.9rem;
+  pointer-events: none;
+  opacity: 0;
+  will-change: transform, opacity;
+}
+
+/* Directional motion */
+@keyframes flyUpFade {
+  0%   { transform: translateY(-50%) translateY(0px);   opacity: 0; }
+  10%  { opacity: 1; }
+  100% { transform: translateY(-50%) translateY(-26px); opacity: 0; }
+}
+@keyframes flyDownFade {
+  0%   { transform: translateY(-50%) translateY(0px);   opacity: 0; }
+  10%  { opacity: 1; }
+  100% { transform: translateY(-50%) translateY(26px);  opacity: 0; }
+}
+
+/* Hooked by JS: balance-fly {type} {dir} */
+.balance-fly.up   { animation: flyUpFade   1.4s ease-out forwards; }
+.balance-fly.down { animation: flyDownFade 1.4s ease-out forwards; }
+
+/* Colors */
+.balance-fly .pos       { color: #36d399; font-weight: 600; }  /* green */
+.balance-fly .neg       { color: #ff6b6b; font-weight: 600; }  /* red */
+.balance-fly .total     { text-decoration: underline; }
+.balance-fly .plus,
+.balance-fly .eq        { margin: 0 4px; opacity: 0.75; }
+/* ===== Phone-only scrollable chip tray (XS <576px) ===== */
+:root { --tray-side-pad: 10px; }
+
+@media (max-width: 575.98px) {
+  .chip-tray.wide { position: relative; padding-top: 4px; }
+
+  .chip-scroller{
+    position: relative;
+    margin: 6px calc(var(--tray-side-pad) * -1) 0; /* bleed to edges */
+    padding: 0 var(--tray-side-pad);
   }
-  
-  button:hover {
-	background-color: #0056b3;
+
+  .chip-track{
+    display: inline-flex;
+    gap: 10px;
+    align-items: center;
+
+    overflow-x: auto;
+    overflow-y: hidden;
+    -webkit-overflow-scrolling: touch;
+    scroll-behavior: smooth;
+
+    padding: 2px 2px 8px;            /* extra bottom so thumbs don't cover */
   }
-  
-  .card {
-	font-size: 100px; /* Increase the font size for cards */
-	background-color: #fff;
-	border: none;
+
+  /* hide the scrollbar but keep it scrollable */
+  .chip-track::-webkit-scrollbar { height: 0; }
+  .chip-track { scrollbar-width: none; }
+
+  /* keep chip size sensible on phones */
+  .chip.use-img { width: 54px; height: 54px; flex: 0 0 54px; }
+  .chip-clear { flex: 0 0 auto; white-space: nowrap; }
+
+  /* gradient edges to hint more chips */
+  .chip-fade{
+    position: absolute; top: 0; bottom: 0;
+    width: 28px; pointer-events: none;
+    z-index: 1;
+    background: linear-gradient(to right, rgba(15,23,42,0.85), transparent);
   }
-  
-  .dice {
-	font-size: 60px; /* Increase the font size for dice */
-	background-color: #fff;
+  .chip-fade--left  { left: 0;  }
+  .chip-fade--right {
+    right: 0;
+    transform: scaleX(-1);
   }
-  
-  /* Style the result and round result elements */
-  .result {
-	font-size: 24px;
-	margin-top: 20px; /* Add margin to separate from the elements above */
-	text-align: center; /* Center-align the result text */
+}
+/* Mobile: keep cards/dice fully visible in their zones */
+@media (max-width: 575.98px) {
+  .table-surface { padding: 12px 8px 16px; }           /* a bit more inner room */
+  .cards-zone,
+  .dice-zone { overflow: visible !important; }         /* don't clip the edges */
+  .cards-zone .zone-label,
+  .dice-zone .zone-label { margin-top: 4px; }
+}
+/* Make space for the fixed navbar */
+.app-nav-spacer {
+  height: var(--nav-h);
+}
+
+/* Mobile HUD: one compact line */
+@media (max-width: 600px) {
+  .hud-bar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    padding: 6px 10px;
+    margin-bottom: 8px !important;
+    border-radius: 10px;
   }
-  
-  /* Add this to your CSS file */
-  .card-item {
-	transition: transform 0.5s ease-in-out;
-	transform-origin: center bottom;
+
+  .hud-left,
+  .hud-right {
+    display: flex;
+    align-items: center;
+    gap: 8px;
   }
-  
-  /* Add this CSS to your Game.css file */
-  .card-item.drawn {
-	transition: transform 0.5s ease-in-out;
-	transform: translateY(-20px); /* Adjust the Y translation as needed */
+
+  .hud-left {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
   }
-  
-  /* Add this CSS to your Game.css file */
-  @keyframes flip {
-	0% {
-	  transform: rotateY(180deg);
-	  opacity: 0;
-	}
-	100% {
-	  transform: rotateY(0deg);
-	  opacity: 1;
-	}
+
+  /* Compact stat pills */
+  .hud-left .stat {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 0;
+    margin: 0;
+    white-space: nowrap;
   }
-  
-  .card-item.drawn {
-	animation: flip 0.5s ease-in-out;
+
+  /* Save vertical space: hide the small labels, keep values */
+  .hud-left .stat .stat-label {
+    display: none;
   }
-  
-  /* Remove the previous animation styles */
-  
-  /* Add a style for the rotated dice face */
-  .rotated {
-	transform: rotateY(180deg);
+
+  .hud-left .stat .stat-value,
+  .hud-left .stat .stat-chip {
+    font-size: 0.9rem;
+    line-height: 1;
   }
-  
+
+  /* Wallet button smaller */
+  .wallet-btn.btn {
+    padding: 4px 10px;
+    font-size: 0.85rem;
+    line-height: 1.1;
+  }
+
+  /* Nudge table a bit lower so nothing peeks under the nav */
+  .poker-table {
+    margin-top: 4px;
+  }
+}
+
+/* --- REMOVE/OVERRIDE: Hide the purple LED and ensure the cyan beam is full-bleed --- */
+/* hide the animated "purple" top LED (led-run) coming from other theme code */
+.led-topbar,
+.led-topbar .led-run {
+  display: none !important;
+  visibility: hidden !important;
+  pointer-events: none !important;
+}
+
+/* Make the cyan "war" beam full-bleed across the viewport and use cyan halo (not purple) */
+.war-top-glow-fixed{
+  position: fixed !important;
+  left: 0 !important;
+  transform: none !important;
+  top: 56px !important;              /* keep under navbar; adjust if needed */
+  width: 100vw !important;           /* full viewport width */
+  max-width: 100% !important;
+  height: 10px !important;
+  border-radius: 0 !important;
+  background: linear-gradient(90deg, #00e6c6, #00e6c6) !important;
+  box-shadow: 0 10px 30px rgba(0,230,198,.28) !important;
+  z-index: 99999 !important;
+  pointer-events: none !important;
+}
+
+/* Replace the purple halo with a cyan halo */
+.war-top-glow-fixed::before{
+  content: "" !important;
+  position: absolute !important;
+  left: -200px !important;
+  right: -200px !important;
+  top: -36px !important;
+  height: 96px !important;
+  border-radius: 999px !important;
+  background: radial-gradient(60% 100% at 50% 0%,
+              rgba(0,230,198,0.48),
+              rgba(0,230,198,0.14) 55%,
+              rgba(0,230,198,0) 75%) !important;
+  filter: blur(8px) !important;
+}
+
+/* Also ensure the over-table glow (if present) uses cyan rather than purple */
+.war-over-table-glow::before{
+  background: radial-gradient(60% 100% at 50% 0%,
+              rgba(0,230,198,0.55),
+              rgba(0,230,198,0.18) 55%,
+              rgba(0,230,198,0) 75%) !important;
+}
+
+/* If you want the over-table sweep to be cyan as well */
+.war-over-table-glow::after{
+  background: linear-gradient(90deg, rgba(255,255,255,0) 0%, rgba(255,255,255,.18) 50%, rgba(255,255,255,0) 100%) !important;
+  mix-blend-mode: screen !important;
+  opacity: .55 !important;
+}
+
+/* --- REMOVE: prevent the later global block from overriding the dark radial backdrop --- */
+/* There is an existing "html, body" rule further down that sets a linear-gradient
+   — override it here so the dark radial background at the top of the file remains. */
+
+
+/* --- INSERT: Theme footer + safe bottom padding --- */
+.theme-footer {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 52px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 4200;
+  background: linear-gradient(180deg, rgba(20,12,27,0.96), rgba(8,6,12,0.98));
+  border-top: 1px solid rgba(255,110,220,0.05);
+  box-shadow: 0 -10px 30px rgba(99,64,255,0.04), inset 0 1px 0 rgba(255,255,255,0.01);
+  color: #cfe3ff;
+  font-size: 0.9rem;
+  -webkit-backdrop-filter: blur(6px);
+  backdrop-filter: blur(6px);
+  pointer-events: auto;
+}
+
+/* thin animated accent line that reuses the LED movement feel */
+.theme-footer::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: -6px;
+  height: 6px;
+  background:
+    linear-gradient(90deg, rgba(0,0,0,0) 0%, rgba(255,255,255,0.03) 20%, rgba(255,110,220,0.9) 48%, rgba(255,255,255,0.03) 56%, rgba(0,0,0,0) 100%);
+  background-size: 300% 100%;
+  filter: blur(6px);
+  mix-blend-mode: screen;
+  animation: led-bg-move 3s linear infinite;
+  z-index: 4201;
+  pointer-events: none;
+}
+
+/* layout inside footer */
+.theme-footer .theme-footer-inner {
+  width: min(1180px, 96%);
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 12px;
+}
+
+/* small link styles */
+.theme-footer .text-link {
+  color: #bfcff8;
+  text-decoration: none;
+  opacity: 0.95;
+  margin: 0 6px;
+}
+.theme-footer .text-link:hover { color: #fff; text-decoration: underline; }
+.theme-footer .sep { color: rgba(255,255,255,0.06); margin: 0 6px; }
+
+/* keep some space at bottom of page so fixed footer doesn't overlap content */
+html, body, #root {
+  /* existing backdrop overrides remain; add safe padding to bottom */
+  padding-bottom: 72px !important;
+}
+
+/* --- END INSERT --- */
+
+/* ...existing code... */

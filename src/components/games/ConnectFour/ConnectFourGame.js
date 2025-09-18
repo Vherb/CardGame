@@ -2,137 +2,79 @@ class ConnectFourGame {
   constructor(rows, columns) {
     this.rows = rows;
     this.columns = columns;
-    this.board = Array.from({ length: rows }, () =>
-      Array.from({ length: columns }, () => null)
-    );
-    this.currentPlayer = 'Player 1'; // Start with Player 1
+    this.reset();
+    this.players = [];
+    this.id = Date.now().toString();
+  }
+
+  reset() {
+    this.board = Array.from({ length: this.rows }, () => Array(this.columns).fill(null));
+    this.currentPlayer = 'Player 1';
     this.winner = null;
     this.gameOver = false;
-    this.players = []; // Store the players in the game
-    this.id = Date.now().toString(); // Assign a unique game ID
+    this.lastMove = null; // {row, col}
   }
 
-// Add a player to the game
-addPlayer(player) {
-  if (this.players.length < 2) {
+  addPlayer(player, username = null) {
+    if (this.players.length >= 2) return false;
     this.players.push(player);
-    
-    // Assign player numbers based on the order of joining
-    if (this.players.length === 1) {
-      player.playerNumber = 1;
-    } else if (this.players.length === 2) {
-      player.playerNumber = 2;
-    }
-    
-    console.log(`Player added: ${player} as Player ${player.playerNumber}`);
-  } else {
-    console.log('Game is already full. Cannot add more players.');
-  }
-}
-
-
-  // Remove a player from the game
-  removePlayer(player) {
-    this.players = this.players.filter((p) => p !== player);
-    console.log(`Player removed: ${player}`);
+    player.playerNumber = this.players.length; // 1 or 2
+    player.__username = username;
+    return true;
   }
 
-  // Check if the game is full (has two players)
-  isFull() {
-    return this.players.length === 2;
-  }
+  isFull() { return this.players.length === 2; }
+  isEmpty() { return this.players.length === 0; }
 
-  // Switch to the next player
-  switchPlayer() {
-    this.currentPlayer = this.currentPlayer === 'Player 1' ? 'Player 2' : 'Player 1';
-    console.log(`Switched to ${this.currentPlayer}`);
-  }
+  switchPlayer() { this.currentPlayer = this.currentPlayer === 'Player 1' ? 'Player 2' : 'Player 1'; }
 
-  // Get the player number (1 or 2) for a given player
-  getPlayerNumber(player) {
-    return this.players.indexOf(player) + 1;
-  }
-
-  // Check if the game is empty (has no players)
-  isEmpty() {
-    return this.players.length === 0;
+  findEmptyRow(column) {
+    for (let r = this.rows - 1; r >= 0; r--) if (this.board[r][column] === null) return r;
+    return -1;
   }
 
   makeMove(column) {
-    if (this.gameOver) {
-      console.log('Game is already over. Cannot make a move.');
-      return false; // Game is already over
-    }
-  
+    if (this.gameOver) return false;
     const row = this.findEmptyRow(column);
-    if (row === -1) {
-      console.log('Column is full. Cannot make a move.');
-      return false; // Column is full
-    }
-  
+    if (row < 0) return false;
     this.board[row][column] = this.currentPlayer;
-  
-    if (this.checkWin(row, column)) {
+    this.lastMove = { row, col: column };
+
+    if (this.checkWin(row, column, this.currentPlayer)) {
       this.winner = this.currentPlayer;
       this.gameOver = true;
-      console.log(`Player ${this.winner} wins! Game over.`);
+    } else {
+      this.switchPlayer();
     }
-  
-    // Switch the current player after each move
-    this.switchPlayer();
-  
-    return true; // Move was successful
-  }
-  
-  
-
-
-  findEmptyRow(column) {
-    for (let row = this.rows - 1; row >= 0; row--) {
-      if (this.board[row][column] === null) {
-        return row;
-      }
-    }
-    return -1; // Column is full
+    return true;
   }
 
-  checkWin(row, col) {
-    const directions = [
-      [0, 1],     // Right
-      [1, 0],     // Down
-      [1, 1],     // Diagonal down-right
-      [1, -1],    // Diagonal down-left
+  // Proper 2-direction scanning per vector
+  checkWin(row, col, player) {
+    const dirs = [
+      [0, 1],  // horizontal
+      [1, 0],  // vertical
+      [1, 1],  // diag ↘
+      [1, -1], // diag ↙
     ];
-
-    for (const [dr, dc] of directions) {
-      let count = 1; // Count consecutive tokens in a direction
-
-      // Check for consecutive tokens in both directions
-      for (let i = 1; i <= 3; i++) {
-        const r = row + i * dr;
-        const c = col + i * dc;
-        if (
-          r >= 0 &&
-          r < this.rows &&
-          c >= 0 &&
-          c < this.columns &&
-          this.board[r][c] === this.currentPlayer
-        ) {
-          count++;
-        } else {
-          break; // Stop checking in this direction
-        }
+    for (const [dr, dc] of dirs) {
+      let count = 1;
+      // forward
+      for (let s = 1; s < 4; s++) {
+        const r = row + dr * s, c = col + dc * s;
+        if (r < 0 || r >= this.rows || c < 0 || c >= this.columns || this.board[r][c] !== player) break;
+        count++;
       }
-
-      if (count >= 4) {
-        return true; // Player has won
+      // backward
+      for (let s = 1; s < 4; s++) {
+        const r = row - dr * s, c = col - dc * s;
+        if (r < 0 || r >= this.rows || c < 0 || c >= this.columns || this.board[r][c] !== player) break;
+        count++;
       }
+      if (count >= 4) return true;
     }
-
-    return false; // No win
+    return false;
   }
 }
-
-
 
 module.exports = ConnectFourGame;
