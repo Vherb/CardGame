@@ -1,27 +1,34 @@
 #!/usr/bin/env bash
 set -e
 
-# 1) Ensure we have latest remote refs
+# Fetch latest remote refs
 git fetch origin
 
-# 2) Create a new branch 'neon-games' based on origin/main
-# If you already have a local neon-games, this will error — the fallback checks out the existing branch.
-if git show-ref --verify --quiet refs/heads/neon-games; then
-  echo "Local branch 'neon-games' already exists — checking it out."
+# Ensure neon-games branch exists locally, create from origin/main if not
+if git rev-parse --verify --quiet neon-games >/dev/null; then
+  echo "Checking out existing local 'neon-games'..."
   git checkout neon-games
 else
   echo "Creating 'neon-games' from origin/main..."
   git checkout -b neon-games origin/main
 fi
 
-# 3) Optionally include current working changes:
-# If you want to include any uncommitted changes automatically, uncomment the next lines:
-# if [ -n "$(git status --porcelain)" ]; then
-#   git add .
-#   git commit -m "Start neon-games branch with LED/theme updates"
-# fi
+# If branch already has an upstream, show it and exit
+if git rev-parse --abbrev-ref --symbolic-full-name @{u} >/dev/null 2>&1; then
+  echo "Upstream already configured: $(git rev-parse --abbrev-ref --symbolic-full-name @{u})"
+  exit 0
+fi
 
-# 4) Push and set upstream
-git push -u origin neon-games
+# If remote origin/neon-games exists, set local branch to track it
+if git ls-remote --exit-code --heads origin neon-games >/dev/null 2>&1; then
+  echo "Remote branch origin/neon-games found — setting local upstream..."
+  git branch --set-upstream-to=origin/neon-games neon-games
+  echo "Pulling remote changes (fast-forward only)..."
+  git pull --ff-only
+else
+  # Otherwise push local branch and set upstream
+  echo "Pushing 'neon-games' to origin and setting upstream..."
+  git push -u origin neon-games
+fi
 
-echo "Branch 'neon-games' created (or checked out) and pushed. You are now on neon-games."
+echo "Branch 'neon-games' is now set to track origin/neon-games."
