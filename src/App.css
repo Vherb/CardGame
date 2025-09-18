@@ -1,6 +1,20 @@
-/* Remove border and make the container size match the cards */
+/* === Global fixes for safe-area & cutoff === */
+html, body, #root {
+  width: 100%;
+  max-width: 100%;
+  overflow-x: hidden;     /* Prevent board cutoff / sideways scrolling */
+  box-sizing: border-box;
+}
 
-/* App.css */
+*, *::before, *::after {
+  box-sizing: inherit;
+}
+
+/* Recommended meta tag in index.html:
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+*/
+
+/* === Existing App.css styles === */
 
 body {
   font-family: Arial, sans-serif;
@@ -11,7 +25,6 @@ body {
 
 .App {
   text-align: center;
-  
 }
 
 h1 {
@@ -19,11 +32,10 @@ h1 {
   font-size: 36px;
   margin-bottom: 20px;
 }
-p {
- font-size: 15%;
-}
- 
 
+p {
+  font-size: 15%;
+}
 
 .game-container {
   display: flex;
@@ -31,14 +43,14 @@ p {
   align-items: center;
   flex-wrap: wrap;
   background-color: #ad0000;
-
-}
-.game-card{
-background-color: #ad0808;
 }
 
-.game-background{
-background-color: #ffffff;
+.game-card {
+  background-color: #ad0808;
+}
+
+.game-background {
+  background-color: #ffffff;
 }
 
 .coin-display {
@@ -65,10 +77,5 @@ button:hover {
   background-color: #0056b3;
 }
 
-
-
-
 /* card animations */
-
-
-
+/* (your animations would continue here) */

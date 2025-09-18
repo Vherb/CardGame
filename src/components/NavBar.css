@@ -1,0 +1,72 @@
+:root {
+  /* This will be updated by NavBar measuring itself */
+  --nav-h: 64px;
+}
+
+/* Keep a tiny contrast boost vs plain bootstrap */
+.app-navbar {
+  background: linear-gradient(180deg, #0b1220, #0b1220) !important;
+  border-bottom: 1px solid rgba(255,255,255,.08);
+}
+
+.app-navbar .navbar-toggler {
+  border: 1px solid rgba(255,255,255,.25);
+}
+
+/* Brand */
+.brand {
+  display: inline-flex;
+  align-items: center;
+  gap: .5rem;
+  font-weight: 900;
+  letter-spacing: .2px;
+}
+.brand-emblem {
+  font-size: 1.15rem;
+  line-height: 1;
+}
+.brand-name {
+  font-size: 1rem;
+}
+
+/* Wallet pill */
+.wallet-pill {
+  border-radius: 999px;
+  font-weight: 800;
+  letter-spacing: .2px;
+  padding: .35rem .8rem;
+  line-height: 1.1;
+  display: inline-flex;
+  align-items: center;
+  gap: .25rem;
+  border-color: rgba(255,255,255,.35) !important;
+}
+.wallet-pill:hover {
+  background: rgba(255,255,255,.08);
+  border-color: rgba(255,255,255,.55) !important;
+}
+
+/* User pill (dropdown trigger) */
+.user-pill {
+  display: inline-flex;
+  align-items: center;
+  font-weight: 800;
+}
+
+/* Login button */
+.login-btn {
+  border-radius: 999px;
+  font-weight: 900;
+  background-image: linear-gradient(180deg, #2563eb, #1d4ed8);
+  border: 0;
+  padding: .4rem .9rem;
+}
+.login-btn:hover {
+  filter: brightness(1.05);
+}
+
+/* Optional: ensure page content starts below navbar if you want to use it here
+   (most of your screens already add a spacer or padding using --nav-h) */
+/*
+body { padding-top: var(--nav-h); }
+*/
