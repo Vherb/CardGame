@@ -1,9 +1,18 @@
 import React from 'react';
 import ReactDOM from 'react-dom/client';
+import './theme.css';
 import './App.css';
 import App from './App';
 import reportWebVitals from './reportWebVitals';
 import { BrowserRouter } from "react-router-dom";
+
+// Ensure we always start scrolled to the top
+try {
+    if ('scrollRestoration' in window.history) {
+        window.history.scrollRestoration = 'manual';
+    }
+} catch {}
+window.scrollTo?.(0, 0);
 
 const root = ReactDOM.createRoot(document.getElementById('root'));
 root.render(

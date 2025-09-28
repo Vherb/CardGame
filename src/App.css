@@ -1,3 +1,5 @@
+@import './components/common/buttons.css';
+
 /* === Global fixes for safe-area & cutoff === */
 html, body, #root {
   width: 100%;
@@ -18,7 +20,6 @@ html, body, #root {
 
 body {
   font-family: Arial, sans-serif;
-  background-color: #841b1b;
   margin: 0;
   padding: 0;
 }
@@ -37,45 +38,24 @@ p {
   font-size: 15%;
 }
 
+/* Global animation speed variables (unify sweep/LED speeds site-wide) */
+:root {
+  --global-led-speed: 10s;     /* slower, unified default */
+  --led-speed: var(--global-led-speed);
+}
+
 .game-container {
   display: flex;
   justify-content: center;
   align-items: center;
   flex-wrap: wrap;
-  background-color: #ad0000;
 }
 
-.game-card {
-  background-color: #ad0808;
-}
 
-.game-background {
-  background-color: #ffffff;
-}
 
-.coin-display {
-  background-color: #fff;
-  border: 1px solid #ddd;
-  padding: 5px;
-  border-radius: 4px;
-  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
-}
+.coin-display { padding: 5px; border-radius: 4px; }
 
-button {
-  background-color: #007BFF;
-  color: #8e1313;
-  font-size: 24px; /* Increase the font size for buttons */
-  padding: 15px 30px; /* Adjust button padding */
-  border: none;
-  border-radius: 4px;
-  cursor: pointer;
-  margin-top: 20px; /* Increase the margin-top for buttons */
-  transition: background-color 0.2s;
-}
-
-button:hover {
-  background-color: #0056b3;
-}
+/* Global button theme now comes from components/common/buttons.css */
 
 /* card animations */
 /* (your animations would continue here) */

@@ -1,10 +1,9 @@
 /* --- INSERT / ADJUST: overrides for dark backdrop, nav gap, LED and chip halo thickness --- */
 
 html, body, #root {
-  /* Force dark background regardless of other styles that might set white */
-  background: radial-gradient(60% 80% at 50% 10%, #3b1d55 0%, #140a1c 55%, #0a0613 75%, #000 100%) !important;
+  background: var(--bg-body) !important;
   background-attachment: fixed !important;
-  color: #fff !important;
+  color: var(--text) !important;
   min-height: 100%;
 }
 
@@ -15,7 +14,15 @@ html, body, #root {
 }
 
 /* --- Insert: shared LED rail + footer for RollofCards page --- */
-:root { --nav-height: 64px; }
+:root {
+  --nav-height: 64px;
+  /* Local page variables */
+  --rim-a: #3e2a1b;
+  --rim-b: #2b1f13;
+  --rim-c: #1f150c;
+  --gold: #fcd34d;
+  --muted: #94a3b8;
+}
 
 .led-topbar {
   position: fixed !important;
@@ -33,7 +40,7 @@ html, body, #root {
 }
 .led-run {
   --led-color: rgba(255,110,220,0.95);
-  --led-speed: 5s;
+  --led-speed: var(--global-led-speed);
   position: relative;
   width: 120vw;
   height: 8px;
@@ -85,28 +92,11 @@ html, body, #root {
 }
 
 /* Footer (page-level fallback; matches App theme) */
-.theme-footer {
-  position: fixed;
-  left: 0; right: 0; bottom: 0;
-  height: 52px;
-  display: flex; align-items: center; justify-content: center;
-  z-index: 4200;
-  background: linear-gradient(180deg, rgba(20,12,27,0.96), rgba(8,6,12,0.98));
-  border-top: 1px solid rgba(255,110,220,0.05);
-  box-shadow: 0 -10px 30px rgba(99,64,255,0.04), inset 0 1px 0 rgba(255,255,255,0.01);
-  color: #cfe3ff; font-size: .9rem;
-  -webkit-backdrop-filter: blur(6px); backdrop-filter: blur(6px);
-}
-.theme-footer::before {
-  content: "";
-  position: absolute; left:0; right:0; top:-6px; height:6px;
-  background: linear-gradient(90deg, rgba(0,0,0,0) 0%, rgba(255,255,255,0.03) 20%, rgba(255,110,220,0.9) 48%, rgba(255,255,255,0.03) 56%, rgba(0,0,0,0) 100%);
-  background-size: 300% 100%; filter: blur(6px); mix-blend-mode: screen;
-  animation: led-bg-move 5s linear infinite; z-index:4201; pointer-events:none;
-}
-.theme-footer .theme-footer-inner { width: min(1180px,96%); display:flex; gap:12px; align-items:center; justify-content:space-between; padding:0 12px; }
-.theme-footer .text-link { color:#bfcff8; text-decoration:none; opacity:.95; margin: 0 6px; }
-.theme-footer .text-link:hover { color:#fff; text-decoration:underline; }
+.theme-footer { position: fixed; left: 0; right: 0; bottom: 0; height: auto; display: flex; align-items: center; justify-content: center; z-index: 4200; background: var(--footer-bg) !important; border-top: 1px solid var(--footer-border) !important; box-shadow: var(--surface-shadow) !important; color: var(--text); font-size: .9rem; -webkit-backdrop-filter: none !important; backdrop-filter: none !important; }
+.theme-footer::before { display:none !important; }
+.theme-footer .theme-footer-inner { width: min(1180px,96%); display:flex; gap:12px; align-items:center; justify-content:space-between; padding:6px 12px; }
+.theme-footer .text-link { color: var(--link); text-decoration:none; opacity:.95; margin: 0 6px; }
+.theme-footer .text-link:hover { color: var(--link-hover); text-decoration:underline; }
 
 /* make sure page content has safe padding for fixed footer */
 :root, html, body, #root { padding-bottom: 72px !important; }
@@ -136,7 +126,7 @@ html, body, #root {
 /* the visible moving "rail" */
 .led-run {
   --led-color: rgba(255,110,220,0.95);
-  --led-speed: 3s;
+  --led-speed: var(--global-led-speed);
   position: relative;
   width: 120vw;              /* extend beyond viewport to avoid hard edges */
   height: 8px;
@@ -198,65 +188,13 @@ html, body, #root {
 }
 
 /* Animations */
-@keyframes led-bg-move {
-  0%   { background-position: 0% 50%, 0% 0%; }
-  35%  { background-position: 60% 50%, 0% 0%; }
-  70%  { background-position: 120% 50%, 0% 0%; }
-  100% { background-position: 240% 50%, 0% 0%; }
-}
-
-@keyframes led-sweep {
-  0%   { left: -50%; opacity: 0; transform: skewX(-18deg) translateX(0); }
-  20%  { left: -10%; opacity: 0.95; transform: skewX(-18deg) translateX(6%); }
-  50%  { left: 40%;  opacity: 0.85; transform: skewX(-18deg) translateX(10%); }
-  80%  { left: 110%; opacity: 0.4; transform: skewX(-18deg) translateX(18%); }
-  100% { left: 170%; opacity: 0; transform: skewX(-18deg) translateX(20%); }
-}
-
-@keyframes led-pulse {
-  0%   { transform: scaleY(0.985); opacity: 0.92; }
-  50%  { transform: scaleY(1.03);  opacity: 1;    }
-  100% { transform: scaleY(0.985); opacity: 0.92; }
-}
-
-@keyframes led-texture {
-  0%   { opacity: 0.55; transform: translateY(0); }
-  50%  { opacity: 0.7;  transform: translateY(-1px); }
-  100% { opacity: 0.55; transform: translateY(0); }
-}
-
-/* Remove old/contradictory rules in this file that set body/background to white, or that constrain .led-topbar width or make .app-nav-spacer large.
-   Search for and delete/comment:
-   - any "body { background: white; }"
-   - any ".app-nav-spacer { height: 56px; }"
-   - any ".led-topbar { width: 80%; left: 10%; }" or "position: sticky"
-   - any ".poker-table .table-surface { background: white }"
-*/
-
-html, body {
-  min-height: 100%;
-  margin: 0;
-  background: linear-gradient(135deg, #0f172a, #1e293b);
-  color: #f0e7e2;
-  font-family: 'Inter', system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, 'Helvetica Neue', Arial, 'Apple Color Emoji', 'Segoe UI Emoji', 'Segoe UI Symbol';
-}
-
-:root{
-  --ease-out-quint: cubic-bezier(.23,1,.32,1);
-  --ease-out: cubic-bezier(.22,.8,.22,1);
-  --card-in-ms: 900ms;
-  --dice-in-ms: 1100ms;
-
-  --felt: #0a6a2f;
-  --felt-hi: #0c7a35;
-  --felt-lo: #075a28;
-  --rim-a: #3a2b1a;
-  --rim-b: #2b1f13;
-  --rim-c: #1f150c;
-
-  --gold: #fcd34d;
-  --muted: #94a3b8;
-}
+.theme-footer { position: fixed; left: 0; right: 0; bottom: 0; height: auto; display: flex; align-items: center; justify-content: center; z-index: 4200; background: var(--footer-bg) !important; border-top: 1px solid var(--footer-border) !important; box-shadow: var(--surface-shadow) !important; color: var(--text); font-size: .9rem; -webkit-backdrop-filter: none !important; backdrop-filter: none !important; pointer-events:auto; }
+.theme-footer::before { display:none !important; }
+.theme-footer .theme-footer-inner { width: min(1180px,96%); display:flex; gap:12px; align-items:center; justify-content:space-between; padding:6px 12px; }
+.theme-footer .text-link { color: var(--link); text-decoration:none; opacity:.95; margin: 0 6px; }
+.theme-footer .text-link:hover { color: var(--link-hover); text-decoration:underline; }
+.theme-footer .sep { color: var(--divider); margin: 0 6px; }
+/* Local page variables moved to top :root */
 
 /* Reduce motion accessibility */
 @media (prefers-reduced-motion: reduce){
@@ -273,9 +211,9 @@ html, body {
   gap:12px;
   padding:12px 16px;
   margin-bottom:16px;
-  border:1px solid rgba(255,255,255,.08);
+  border:1px solid var(--card-border);
   border-radius:14px;
-  background:linear-gradient(180deg, rgba(0,0,0,.24), rgba(0,0,0,.12));
+  background: var(--card-bg);
   box-shadow: inset 0 1px 0 rgba(255,255,255,.06);
 }
 .hud-left{ display:flex; align-items:center; gap:22px; flex-wrap:wrap; }
@@ -318,6 +256,31 @@ html, body {
   transform-style: preserve-3d;
   perspective: 900px;
   perspective-origin: 50% 30%;
+}
+
+/* Phone: make the game edge-to-edge (left/right/top/bottom) */
+@media (max-width: 576px) {
+  /* Allow the container to fill entire viewport width */
+  .roc-wrap { padding-left: 0 !important; padding-right: 0 !important; margin: 0 !important; }
+  /* Remove table rounding/padding so it hits the edges */
+  .roc-wrap .table-rim { border-radius: 0; padding: 0; box-shadow: none; }
+  .roc-wrap .table-surface { border-radius: 0; padding: 10px 8px; min-height: calc(100dvh - var(--nav-height, 56px) - var(--footer-h, 0px)); }
+  /* Tighten HUD and sections for small screens */
+  .roc-wrap .hud-bar { border-radius: 10px; padding: 10px 12px; margin-bottom: 10px; }
+  .roc-wrap .table-grid { gap: 10px; }
+  /* Remove any global bottom padding while this screen is in view */
+  html.no-bottom-pad, body.no-bottom-pad, #root.no-bottom-pad { padding-bottom: 0 !important; }
+}
+
+/* Dark theme (Neon default): restore original black board with subtle glow */
+:root:not([data-theme="day"]) .table-surface {
+  background:
+    radial-gradient(ellipse at 50% 40%, rgba(255,255,255,0.06) 0%, rgba(255,255,255,0.02) 38%, rgba(0,0,0,0) 62%),
+    linear-gradient(180deg, #111 0%, #000 100%);
+  box-shadow:
+    inset 0 24px 80px rgba(0,0,0,.55),
+    inset 0 -14px 40px rgba(0,0,0,.45),
+    inset 0 0 42px rgba(255,255,255,0.05);
 }
 
 .table-grid {
@@ -465,8 +428,8 @@ html, body {
 .table-controls {
   margin-top: clamp(12px, 2.5vw, 24px);
   padding: clamp(10px, 1.8vw, 16px);
-  background: rgba(0,0,0,.18);
-  border: 1px solid rgba(255,255,255,.12);
+  background: var(--card-bg);
+  border: 1px solid var(--card-border);
   border-radius: 14px;
 
   display: grid;
@@ -478,7 +441,6 @@ html, body {
   .table-controls{ grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .table-controls .wide { grid-column: span 2; }
 }
-
 /* ===== Chip tray ===== */
 .chip-tray-title{
   font-size:.9rem;
@@ -559,7 +521,7 @@ html, body {
 /* ===== Wallet dialog ===== */
 .wallet-dialog .MuiDialogTitle-root{
   padding: 12px 16px;
-  border-bottom: 1px solid rgba(255,255,255,.08);
+  border-bottom: 1px solid var(--divider);
 }
 .wallet-close{
   position:absolute; right:8px; top:8px;
@@ -790,11 +752,34 @@ html, body {
   min-height: 68px;       /* was 92px */
   border-radius: 999px;
   padding: 8px 12px 10px; /* tighter padding */
-  background: radial-gradient(ellipse at center, rgba(0,0,0,0.22), rgba(0,0,0,0.28)),
-              linear-gradient(180deg, rgba(10,77,10,0.85), rgba(7,60,7,0.85));
+  /* Felt uses theme tokens: green in Day, deep cool in Neon */
+  background:
+    radial-gradient(ellipse at center, rgba(0,0,0,0.18), rgba(0,0,0,0.28)),
+    linear-gradient(180deg, var(--felt-hi), var(--felt-lo));
   box-shadow: inset 0 2px 5px rgba(255,255,255,0.05),
               inset 0 -2px 8px rgba(0,0,0,0.33),
               0 4px 12px rgba(0,0,0,0.22);
+}
+
+/* Dark theme: match bet spot to black board with gentle sheen */
+:root:not([data-theme="day"]) .bet-spot-felt {
+  background:
+    radial-gradient(ellipse at center, rgba(0,0,0,0.22), rgba(0,0,0,0.3)),
+    linear-gradient(180deg, #1a1a1a, #0a0a0a);
+  box-shadow:
+    inset 0 2px 6px rgba(255,255,255,0.05),
+    inset 0 -3px 10px rgba(0,0,0,0.4),
+    0 6px 14px rgba(0,0,0,0.28);
+}
+
+/* Day theme: explicitly ensure felt is casino green for table and bet spots */
+[data-theme="day"] .table-surface {
+  background: radial-gradient(ellipse at 50% 40%, var(--felt-hi) 0%, var(--felt) 45%, var(--felt-lo) 100%);
+}
+[data-theme="day"] .bet-spot-felt {
+  background:
+    radial-gradient(ellipse at center, rgba(0,0,0,0.12), rgba(0,0,0,0.22)),
+    linear-gradient(180deg, var(--felt-hi), var(--felt-lo));
 }
 
 .bet-spot-label {
@@ -853,80 +838,47 @@ html, body {
 :root { --tray-side-pad: 10px; }
 
 @media (max-width: 575.98px) {
-  /* make the tray full-bleed on the felt */
-  .chip-tray.wide { padding-top: 4px; }
+  /* make the tray full-bleed on the felt, but never exceed viewport */
+  .chip-tray.wide { padding-top: 4px; max-width: 100%; }
 
   .chip-scroller{
     position: relative;
-    margin-left: calc(-1 * var(--tray-side-pad));
-    margin-right: calc(-1 * var(--tray-side-pad));
-    padding: 0 var(--tray-side-pad) 6px;
-    overflow-x: auto;
+    margin: 6px 0 0;
+    padding: 0;                    /* match button width */
+    width: 100%;
+    max-width: 100%;
+    text-align: center;            /* center when it fits */
+    overflow-x: auto;              /* this is the scroll container */
     overflow-y: hidden;
     -webkit-overflow-scrolling: touch;
     scrollbar-width: thin;
+    box-sizing: border-box;        /* padding never increases width */
   }
   .chip-scroller::-webkit-scrollbar{ height: 8px; }
   .chip-scroller::-webkit-scrollbar-track{ background: rgba(255,255,255,.06); border-radius: 8px; }
   .chip-scroller::-webkit-scrollbar-thumb{ background: rgba(255,255,255,.22); border-radius: 8px; }
 
-  .chip-strip{
+  .chip-track{
     display: inline-flex;
     align-items: center;
     gap: 10px;
-    min-width: max-content;
-    padding: 2px 2px;
+    min-width: max-content;        /* allow content to extend and scroll */
+    padding: 2px 6px 8px;          /* small side pad so end buttons aren't clipped */
+    box-sizing: border-box;
   }
 
-  /* edge fades to indicate scroll */
-  .chip-scroller::before,
-  .chip-scroller::after{
-    content: "";
-    position: absolute;
-    top: 0; bottom: 8px;
-    width: 44px;
-    pointer-events: none;
-    opacity: 0;
-    transition: opacity .18s ease;
-  }
-  .chip-scroller::before{
-    left: 0;
-    background: linear-gradient(90deg, rgba(0,0,0,.45), rgba(0,0,0,0));
-  }
-  .chip-scroller::after{
-    right: 0;
-    background: linear-gradient(-90deg, rgba(0,0,0,.45), rgba(0,0,0,0));
-  }
-  .chip-scroller.can-left::before{ opacity: 1; }
-  .chip-scroller.can-right::after{ opacity: 1; }
-
-  /* nudge buttons */
-  .chip-nudge{
-    position: absolute;
-    top: 50%;
-    transform: translateY(-50%);
-    height: 28px; width: 28px;
-    border-radius: 999px;
-    border: 1px solid rgba(255,255,255,.25);
-    background: rgba(0,0,0,.45);
-    color: #fff;
-    font-weight: 700;
-    line-height: 1;
-    display: grid;
-    place-items: center;
-    opacity: 0;
-    pointer-events: none;
-    transition: opacity .18s ease, background .12s ease, border-color .12s ease;
-  }
-  .chip-nudge.left{ left: 6px; }
-  .chip-nudge.right{ right: 6px; }
-  .chip-nudge.show{ opacity: .95; pointer-events: auto; }
-  .chip-nudge:active{ background: rgba(0,0,0,.6); border-color: rgba(255,255,255,.35); }
-
-  /* slightly smaller chips on phones so they don’t feel cramped */
-  .chip.use-img{ width: 48px; height: 48px; }
+  /* phone: compact chip size */
+  .chip.use-img{ width: 35px; height: 35px; flex: 0 0 35px; }
   .chip-text{ font-size: .85rem; }
   .chip-clear { white-space: nowrap; }
+
+  /* gradient edge hints (real elements in markup) */
+  .chip-fade{ position: absolute; top: 0; bottom: 0; width: 28px; pointer-events: none; z-index: 1; background: linear-gradient(to right, rgba(15,23,42,0.85), transparent); }
+  .chip-fade--left  { left: 0; }
+  .chip-fade--right { right: 0; transform: scaleX(-1); }
+
+  /* protect readout from pushing layout horizontally */
+  .bet-readout{ white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 }
 
 /* === LAYOUT FIXES: full-bleed, no horizontal overflow === */
@@ -934,6 +886,12 @@ html, body {
 /* Contain widths so nothing spills past the viewport */
 .poker-table { width: 100%; margin: 0 auto; overflow: hidden; }
 .table-rim, .table-surface { max-width: 100%; overflow: hidden; }
+
+/* Extra guard around the chip tray so nothing can push past the container */
+.chip-tray-clamp {
+  max-width: 100%;
+  overflow-x: hidden;
+}
 
 /* Ensure the page never scrolls sideways */
 html, body { overflow-x: hidden; }
@@ -964,6 +922,15 @@ html, body { overflow-x: hidden; }
     padding: 4px 8px 6px;
   }
   .bet-spot-stack { height: 30px; }
+
+  /* Phone-only Start Game button spacing */
+  .start-game-btn-mobile.btn {
+    padding: 10px 14px;
+    font-weight: 800;
+    letter-spacing: .2px;
+    border-radius: 10px;
+    box-shadow: 0 10px 28px rgba(0,0,0,.35), 0 0 0 1px rgba(255,255,255,.08) inset;
+  }
 }
 
 /* Robust box-sizing so padding never causes >100% widths */
@@ -980,6 +947,8 @@ html, body { overflow-x: hidden; }
 .poker-table .col {
   padding-left: 0 !important;
   padding-right: 0 !important;
+  max-width: 100%;
+  overflow-x: hidden;
 }
 
 /* === True full-bleed wrapper === */
@@ -1018,7 +987,7 @@ html, body { overflow-x: hidden; }
 .login-overlay {
   position: absolute;
   inset: 0;
-  background: rgba(10,12,16,0.55);
+  background: color-mix(in oklab, var(--panel-bg) 70%, transparent);
   backdrop-filter: blur(4px);
   display: flex;
   align-items: center;
@@ -1026,31 +995,79 @@ html, body { overflow-x: hidden; }
   z-index: 50;
 }
 .login-overlay .overlay-card {
-  background: #0f172a;
-  color: #fff;
+  background: var(--card-bg);
+  color: var(--text);
   padding: 18px 22px;
   border-radius: 10px;
-  box-shadow: 0 10px 25px rgba(0,0,0,.35);
+  border: 1px solid var(--card-border);
+  box-shadow: var(--surface-shadow), 0 10px 25px rgba(0,0,0,.15);
+}
+
+/* === Rules overlay (centered popup over table) === */
+.rules-overlay{
+  position: fixed;
+  inset: 0;
+  background: color-mix(in oklab, rgba(10,12,20,.85) 85%, transparent);
+  -webkit-backdrop-filter: blur(6px);
+  backdrop-filter: blur(6px);
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  z-index: 1200;
+  padding: 16px;
+}
+.rules-card{
+  width: min(920px, 96vw);
+  max-height: calc(100dvh - 48px);
+  background: var(--card-bg);
+  color: var(--text);
+  border: 1px solid var(--card-border);
+  border-radius: 12px;
+  box-shadow: 0 22px 60px rgba(0,0,0,.45), 0 2px 0 rgba(255,255,255,.04) inset;
+  display:flex;
+  flex-direction:column;
+}
+.rules-header{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--divider);
+}
+.rules-body{
+  padding: 14px 16px;
+  overflow:auto;
+}
+.rules-actions{
+  display:flex;
+  justify-content:flex-end;
+  padding: 10px 14px 12px;
+  border-top: 1px solid var(--divider);
+}
+
+@media (max-width: 520px){
+  .rules-card{ width: 100%; max-height: calc(100dvh - 24px); border-radius: 10px; }
+  .rules-body{ padding: 12px; }
 }
 /* Dark wallet modal */
 .wallet-dark .modal-content {
-  background: #12171d;
-  color: #e7efff;
-  border: 1px solid #1f2a36;
+  background: var(--card-bg);
+  color: var(--text);
+  border: 1px solid var(--card-border);
 }
 .wallet-dark .modal-header,
 .wallet-dark .modal-footer {
-  border-color: #1f2a36;
+  border-color: var(--divider);
 }
 .wallet-dark .btn-outline-light {
-  border-color: #7f9bb9;
-  color: #e7efff;
+  border-color: var(--btn-outline);
+  color: var(--btn-outline);
 }
 .wallet-dark .btn-outline-light:hover,
 .wallet-dark .btn-outline-light:focus {
-  background: #e7efff;
-  color: #0b1220;
-  border-color: #e7efff;
+  background: var(--btn-bg);
+  color: var(--btn-text);
+  border-color: var(--btn-border);
 }
 
 /* Solid buttons for contrast */
@@ -1059,22 +1076,26 @@ html, body { overflow-x: hidden; }
 .wallet-dark .btn-success { background:#22c55e; border-color:#22c55e; }
 .wallet-dark .btn-info { background:#06b6d4; border-color:#06b6d4; }
 
+/* Constrain modal dialog inner area to viewport height */
+.wallet-dark .modal-dialog { margin: 12px auto; }
+.wallet-dark .modal-content { max-height: calc(100dvh - 24px); }
+
 /* Inputs on dark */
 .wallet-dark .wallet-input.form-control {
-  background: #0b1220;
-  color: #e7efff;
-  border-color: #1f2a36;
+  background: var(--input-bg);
+  color: var(--input-text);
+  border-color: var(--input-border);
 }
 .wallet-dark .wallet-input.form-control:focus {
-  background: #0b1220;
-  color: #fff;
-  border-color: #3b82f6;
-  box-shadow: 0 0 0 .2rem rgba(59,130,246,.25);
+  background: var(--input-bg);
+  color: var(--input-text);
+  border-color: var(--input-border);
+  box-shadow: 0 0 0 .2rem color-mix(in oklab, var(--btn-outline) 35%, transparent);
 }
 
 /* Close button contrast */
 .wallet-dark .btn-close {
-  filter: invert(1) grayscale(100%);
+  filter: none;
 }
 /* Position the balance stat as an anchor for the flyout */
 .stat-balance {
@@ -1096,8 +1117,8 @@ html, body { overflow-x: hidden; }
 
   padding: 2px 8px;
   border-radius: 6px;
-  border: 1px solid rgba(255,255,255,0.15);
-  background: rgba(9, 14, 24, 0.9);
+  border: 1px solid var(--card-border);
+  background: var(--panel-bg);
   backdrop-filter: blur(2px);
 
   pointer-events: none;
@@ -1168,29 +1189,33 @@ html, body { overflow-x: hidden; }
 
   .chip-scroller{
     position: relative;
-    margin: 6px calc(var(--tray-side-pad) * -1) 0; /* bleed to edges */
-    padding: 0 var(--tray-side-pad);
+    margin: 6px 0 0;              /* no bleeding; stay contained */
+    padding: 0;                    /* match button width */
+    width: 100%;
+    max-width: 100%;
+    display: block;               /* ensure it behaves as a block container */
+    text-align: center;           /* center when items fit */
+    overflow-x: auto;             /* make THIS the scroll container */
+    overflow-y: hidden;
+    -webkit-overflow-scrolling: touch;
+    touch-action: pan-x;          /* better touch panning */
+    overscroll-behavior-x: contain;
   }
 
   .chip-track{
     display: inline-flex;
     gap: 10px;
     align-items: center;
-
-    overflow-x: auto;
-    overflow-y: hidden;
-    -webkit-overflow-scrolling: touch;
-    scroll-behavior: smooth;
-
-    padding: 2px 2px 8px;            /* extra bottom so thumbs don't cover */
+    min-width: max-content;           /* allow content to extend and scroll */
+    padding: 2px 6px 8px;             /* small side pad so end buttons aren't clipped */
   }
 
   /* hide the scrollbar but keep it scrollable */
   .chip-track::-webkit-scrollbar { height: 0; }
   .chip-track { scrollbar-width: none; }
 
-  /* keep chip size sensible on phones */
-  .chip.use-img { width: 54px; height: 54px; flex: 0 0 54px; }
+  /* phone: compact chip size */
+  .chip.use-img { width: 35px; height: 35px; flex: 0 0 35px; }
   .chip-clear { flex: 0 0 auto; white-space: nowrap; }
 
   /* gradient edges to hint more chips */
@@ -1389,14 +1414,9 @@ html, body { overflow-x: hidden; }
 }
 
 /* small link styles */
-.theme-footer .text-link {
-  color: #bfcff8;
-  text-decoration: none;
-  opacity: 0.95;
-  margin: 0 6px;
-}
-.theme-footer .text-link:hover { color: #fff; text-decoration: underline; }
-.theme-footer .sep { color: rgba(255,255,255,0.06); margin: 0 6px; }
+.theme-footer .text-link { color: var(--link); text-decoration: none; opacity: 0.95; margin: 0 6px; }
+.theme-footer .text-link:hover { color: var(--link-hover); text-decoration: underline; }
+.theme-footer .sep { color: var(--divider); margin: 0 6px; }
 
 /* keep some space at bottom of page so fixed footer doesn't overlap content */
 html, body, #root {

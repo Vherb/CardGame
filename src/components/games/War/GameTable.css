@@ -2,7 +2,7 @@
 
 /* page */
 /* Use the same dark/neon radial background as other pages so War matches the theme */
-.war-page { min-height: 100dvh; background: radial-gradient(60% 60% at 50% 10%, #3b1d55 0%, #140a1c 55%, #0a0613 75%, #000 100%); color: #e5e7eb; display:flex; flex-direction:column; }
+.war-page { min-height: 100dvh; background: var(--bg-body); color: var(--text); display:flex; flex-direction:column; }
 
 /* ensure the War page root honors the global navbar height and never sits underneath it */
 .gambit-war-page {
@@ -10,7 +10,7 @@
   padding-top: calc(var(--nav-height, 64px) + 12px) !important;
   box-sizing: border-box;
   /* use the site-wide dark/neon radial background */
-  background: radial-gradient(60% 60% at 50% 10%, #3b1d55 0%, #140a1c 55%, #0a0613 75%, #000 100%);
+  background: var(--bg-body);
 }
 /* --- NEW: force the global LED to sit flush on top of the gameboard for War page --- */
 /* The LED is a fixed element rendered by App.js; override its top so its bottom touches the table top. */
@@ -36,7 +36,7 @@
   background: linear-gradient(90deg, rgba(255,110,220,0.95) 0%, rgba(0,230,198,0.9) 40%, rgba(255,110,220,0.95) 100%);
   box-shadow: 0 6px 24px rgba(255,110,220,0.12), inset 0 2px 12px rgba(255,255,255,0.04);
   /* speed is controlled by --led-speed; default to 4s */
-  animation: gflash var(--led-speed, 4s) linear infinite;
+  animation: gflash var(--led-speed, var(--global-led-speed, 10s)) linear infinite;
   opacity: 0.98;
 }
 
@@ -49,7 +49,7 @@
 
 /* --- NEW: brown felt for the gameboard (and matching bet spot) --- */
 .table-surface {
-  background: radial-gradient(60% 60% at 50% 10%, #2b0d34 0%, #14081a 50%, #000 100%) !important;
+  background: radial-gradient(ellipse at 50% 40%, var(--felt-hi) 0%, var(--felt) 45%, var(--felt-lo) 100%) !important;
   border-radius: 12px;
   box-shadow: inset 0 2px 8px rgba(0,0,0,.45), 0 8px 40px rgba(0,0,0,.6);
   /* keep card canvas visible above the felt */
@@ -59,69 +59,55 @@
 
 /* small felt panels like the bet-spot should match the brown theme */
 .bet-spot-felt {
-  background: linear-gradient(180deg, rgba(11,18,32,0.72) 0%, rgba(8,10,16,0.85) 100%) !important;
-  border: 1px solid rgba(255,255,255,0.02);
+  background: radial-gradient(ellipse at 50% 40%, var(--felt-hi) 0%, var(--felt) 45%, var(--felt-lo) 100%) !important;
+  border: 1px solid var(--card-border);
   box-shadow: inset 0 3px 8px rgba(0,0,0,.5);
   color: #cfe3ff;
 }
 
 /* HUD */
 /* stick the HUD just under the navbar so it never overlaps and keeps consistent spacing */
-.war-hud {
-  display:flex;
-  justify-content:space-between;
-  align-items:center;
-  gap:.75rem;
-  padding:.6rem .8rem;
-  background: linear-gradient(120deg,#6d28d9,#2563eb,#06b6d4);
-  box-shadow: 0 .6rem 1.2rem rgba(0,0,0,.25);
-  position: sticky;
-  top: calc(var(--nav-height, 64px) + 8px);
-  z-index: 1000;
-}
-.war-hud .hud-chip { display:inline-flex; align-items:center; gap:.4rem; background: rgba(255,255,255,.16); padding:.28rem .55rem; border-radius:999px; font-weight:800; }
-.btn-join, .btn-leave { border:0; padding:.45rem .75rem; border-radius:.6rem; font-weight:800; color:#0b1220; background:#fff; cursor:pointer; }
-.btn-leave { background:transparent; color:#fff; border:1px solid rgba(255,255,255,.3); }
+.btn-leave { border:0; padding:.45rem .75rem; border-radius:.6rem; font-weight:800; color: var(--text); background:transparent; border:1px solid var(--divider); cursor:pointer; }
 
 /* Setup */
 .setup { display:grid; place-items:center; padding: 24px; }
-.setup-card { width:min(760px, 92vw); background:#0f172a; border:1px solid rgba(255,255,255,.08); border-radius:16px; box-shadow:0 1.2rem 2.4rem rgba(0,0,0,.35); padding:16px; }
+.setup-card { width:min(760px, 92vw); background: var(--card-bg); border:1px solid var(--card-border); border-radius:16px; box-shadow:0 1.2rem 2.4rem rgba(0,0,0,.35); padding:16px; }
 .setup-card h3 { margin:4px 0 12px; font-weight:900; }
 .row { display:grid; gap:6px; margin-bottom:12px; }
-.row label { font-weight:800; color:#cbd5e1; }
-.row input { background:#0b1220; border:1px solid rgba(255,255,255,.1); color:#fff; padding:.55rem .65rem; border-radius:.6rem; }
+.row label { font-weight:800; color: var(--muted); }
+.row input { background: var(--input-bg); border:1px solid var(--input-border); color: var(--input-text); padding:.55rem .65rem; border-radius:.6rem; }
 .ava-row { display:flex; flex-wrap:wrap; gap:8px; }
-.ava-btn { width:44px; height:44px; border-radius:999px; border:1px solid rgba(255,255,255,.18); background:#0b1220; cursor:pointer; font-size:22px; }
+.ava-btn { width:44px; height:44px; border-radius:999px; border:1px solid var(--divider); background: var(--nav-bg); cursor:pointer; font-size:22px; }
 .ava-btn.is-active { outline:2px solid #22c55e; }
 .stake-input { display:flex; align-items:center; gap:6px; }
-.stake-input > span { background:#0b1220; border:1px solid rgba(255,255,255,.1); padding:.55rem .6rem; border-radius:.6rem; }
-.btn-join.wide { width:100%; margin-top:8px; }
+.stake-input > span { background: var(--input-bg); border:1px solid var(--input-border); padding:.55rem .6rem; border-radius:.6rem; }
+/* width helper removed with CTA revert */
 
 /* Matchmaking */
 .match-overlay { position:fixed; inset:0; display:grid; place-items:center; background:rgba(9,12,18,.55); z-index:50; backdrop-filter:blur(2px); -webkit-backdrop-filter:blur(2px); }
-.match-card { width:min(860px,94vw); background:#0f172a; border:1px solid rgba(255,255,255,.08); border-radius:16px; overflow:hidden; box-shadow:0 1.25rem 2.5rem rgba(0,0,0,.35); }
+.match-card { width:min(860px,94vw); background: var(--card-bg); border:1px solid var(--card-border); border-radius:16px; overflow:hidden; box-shadow:0 1.25rem 2.5rem rgba(0,0,0,.35); }
 .match-header { display:flex; align-items:center; justify-content:space-between; padding:.8rem 1rem; color:#fff; background: linear-gradient(120deg,#6d28d9,#2563eb,#06b6d4); }
 .match-body { display:grid; grid-template-columns:1fr 40px 1fr; gap:0; padding:1rem; }
 .match-col { padding:.75rem; display:grid; align-content:center; gap:.75rem; text-align:center; }
-.match-divider { display:grid; place-items:center; color:#fff; font-weight:900; }
-.mm-avatar { display:grid; place-items:center; width:96px; height:96px; border-radius:999px; background:#0b1220; border:3px solid rgba(255,255,255,.4); margin:0 auto; }
-.mm-pill { display:inline-flex; align-items:center; gap:.4rem; padding:.28rem .55rem; border-radius:999px; background: rgba(255,255,255,.1); color:#fff; font-weight:800; }
-.mm-cancel { background:transparent; color:#fff; border:1px solid rgba(255,255,255,.3); padding:.45rem .8rem; border-radius:.6rem; font-weight:800; }
+.match-divider { display:grid; place-items:center; color: var(--text); font-weight:900; }
+.mm-avatar { display:grid; place-items:center; width:96px; height:96px; border-radius:999px; background: var(--nav-bg); border:3px solid rgba(255,255,255,.4); margin:0 auto; }
+.mm-pill { display:inline-flex; align-items:center; gap:.4rem; padding:.28rem .55rem; border-radius:999px; background: rgba(255,255,255,.1); color: var(--text); font-weight:800; }
+.mm-cancel { background:transparent; color: var(--text); border:1px solid var(--divider); padding:.45rem .8rem; border-radius:.6rem; font-weight:800; }
 .mm-footer { padding:.6rem .9rem; border-top:1px solid rgba(255,255,255,.08); }
 
 /* Table */
 .table-wrap { width: min(980px, 96vw); margin: 16px auto; display:grid; gap:14px; }
-.player-row { display:flex; align-items:center; justify-content:space-between; background:#0f172a; border:1px solid rgba(255,255,255,.08); border-radius:14px; padding:10px 12px; font-weight:800; }
+.player-row { display:flex; align-items:center; justify-content:space-between; background: var(--card-bg); border:1px solid var(--card-border); border-radius:14px; padding:10px 12px; font-weight:800; }
 .player-row .score, .player-row .stake { opacity:.9; font-weight:700; }
-.ava { display:inline-grid; place-items:center; width:28px; height:28px; border-radius:50%; background:#0b1220; border:2px solid rgba(255,255,255,.4); box-shadow:0 6px 12px rgba(0,0,0,.35); }
+.ava { display:inline-grid; place-items:center; width:28px; height:28px; border-radius:50%; background: var(--nav-bg); border:2px solid rgba(255,255,255,.4); box-shadow:0 6px 12px rgba(0,0,0,.35); }
 
 /* Cards row */
 .cards-row { display:grid; grid-template-columns:1fr minmax(160px, 200px) 1fr; align-items:center; gap:12px; }
 .vs-col { display:grid; place-items:center; gap:10px; }
 .round-banner { background:#16a34a; color:#052e16; font-weight:900; padding:.28rem .55rem; border-radius:999px; }
 .war-badge { background:#eab308; color:#422006; font-weight:900; padding:.28rem .55rem; border-radius:999px; }
-.btn-deal { border:0; background:#fff; color:#0b1220; padding:.55rem .9rem; border-radius:.8rem; font-weight:900; cursor:pointer; }
-.btn-deal:disabled { opacity:.55; cursor:not-allowed; }
+/* Let global CTA style these; keep disabled behavior */
+.btn-deal:disabled { opacity:.6; cursor:not-allowed; }
 .end-row { display:grid; gap:8px; place-items:center; }
 .final-banner { font-weight:900; color:#fff; background:#10b981; padding:.4rem .7rem; border-radius:.8rem; }
 
@@ -397,3 +383,6 @@
   z-index: 11000 !important;
   display: block;
 }
+
+/* Anchor overlays higher in the viewport for War */
+.app-content { position: relative; min-height: calc(100dvh - var(--nav-h, var(--nav-height, 64px)) - var(--footer-h, 0px)); }

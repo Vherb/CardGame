@@ -1,0 +1,93 @@
+:root {
+  --cta-grad: linear-gradient(90deg,#ffd400,#ff7a00);
+  --cta-text: #0b0713;
+}
+
+/* Base: apply CTA to normal clickable buttons */
+button, .btn {
+  background-image: var(--cta-grad);
+  color: var(--cta-text) !important;
+  border: 0 !important;
+  font-weight: 800;
+  box-shadow: 0 10px 28px rgba(255,215,0,.25);
+}
+button:hover, .btn:hover { filter: brightness(1.05); }
+button:active, .btn:active { transform: translateY(1px); }
+button:disabled, .btn:disabled { opacity: .65; cursor: not-allowed; }
+
+/* Exclusions: chips and avatar selectors stay neutral, no borders */
+.badge-chip,
+.mm-pill,
+.avatar-btn,
+.ava-btn {
+  background-image: none !important;
+  background: transparent !important;
+  color: inherit !important;
+  border: none !important;
+  box-shadow: none !important;
+  -webkit-appearance: none; appearance: none;
+  outline: none !important;
+}
+
+/* Color swatches should show their own inline color, not gradient */
+.led-swatch,
+.sw {
+  background-image: none !important; /* remove gradient only */
+  box-shadow: none !important;
+  border: none !important;
+  -webkit-appearance: none; appearance: none;
+  padding: 0 !important; margin: 0 !important; line-height: 0 !important;
+  border-radius: 999px !important; outline: none !important;
+  background-clip: padding-box !important;
+  /* do NOT override background so inline hex shows */
+}
+
+/* Ensure the tiny color dot used in labels is circular with no border */
+.mm-swab { display:inline-block; width:12px; height:12px; border-radius:999px; border:none !important; box-shadow:none !important; }
+
+/* Input adornments aren’t clickable buttons */
+.input-group-text { background: transparent !important; color: inherit !important; border: 1px solid rgba(255,255,255,.28) !important; box-shadow: none !important; }
+
+/* end */
+/* Shared CTA button (War-style gradient) */
+.btn-cta,
+.btn.btn-cta {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 10px 16px;
+  border: 0;
+  border-radius: 999px;
+  font-weight: 900;
+  letter-spacing: .2px;
+  color: #0b0713;
+  background: linear-gradient(90deg, #ffd400, #ff7a00);
+  box-shadow: 0 10px 30px rgba(255, 215, 0, .25);
+  transition: transform .12s ease, box-shadow .12s ease, filter .12s ease;
+}
+.btn-cta:hover,
+.btn.btn-cta:hover {
+  filter: brightness(1.05);
+  box-shadow: 0 12px 34px rgba(255, 215, 0, .32);
+  text-decoration: none;
+}
+.btn-cta:active,
+.btn.btn-cta:active {
+  transform: translateY(1px);
+  box-shadow: 0 8px 22px rgba(255, 215, 0, .22);
+}
+.btn-cta:disabled,
+.btn.btn-cta:disabled {
+  opacity: .6;
+  cursor: not-allowed;
+  box-shadow: none;
+}
+.btn-cta--wide { width: 100%; }
+
+/* Explicit final opt-out (no gradient/borders/shadows) */
+.led-swatch, .sw, .avatar-btn, .ava-btn, .badge-chip, .mm-pill {
+  background-image: none !important;
+  box-shadow: none !important;
+  border: none !important;
+}

@@ -1,0 +1,120 @@
+/* Reuse Checkers styles; only override names if needed */
+@import '../Checkers/CheckersScreen.css';
+
+/* Keep background inherited from Checkers; over-setup glow handled in GameSetup */
+
+/* Fancy LED/glow color swatches */
+.led-swatch { position:relative; padding:0; border:none; outline:none; cursor:pointer; display:inline-grid; place-items:center; }
+.led-swatch .led-ring {
+	position:absolute; inset:-6px; border-radius:999px;
+	background: radial-gradient(closest-side, rgba(255,255,255,.45), transparent 60%),
+							conic-gradient(from 0deg, rgba(255,255,255,.0), rgba(255,255,255,.35), rgba(255,255,255,.0));
+	animation: ringSpin 3.4s linear infinite; filter: blur(0.4px); pointer-events:none;
+}
+.led-swatch.is-active .led-ring { box-shadow: 0 0 14px rgba(255,255,255,.5), inset 0 0 8px rgba(255,255,255,.35); }
+@keyframes ringSpin { to { transform: rotate(360deg); } }
+
+/* Avatar picker overlay (shared style) */
+.avatar-modal { position:fixed; inset:0; z-index:1050; background:rgba(0,0,0,.6); display:grid; place-items:center; }
+.avatar-card { width:min(680px, 92vw); background: var(--card-bg); color: var(--text); border-radius:16px; box-shadow:0 20px 50px rgba(0,0,0,.35), inset 0 1px 0 rgba(255,255,255,.04); border:1px solid var(--card-border); }
+.avatar-hd { display:flex; justify-content:space-between; align-items:center; padding:14px 16px; border-bottom:1px solid rgba(255,255,255,.08); color:#fff; }
+.avatar-grid { display:grid; grid-template-columns:repeat(auto-fill, minmax(120px, 1fr)); gap:12px; padding:16px; }
+.avatar-btn { background: var(--panel-bg); color: var(--text); border:1px solid var(--divider); border-radius:12px; padding:12px; cursor:pointer; text-align:center; box-shadow:0 10px 22px rgba(0,0,0,.35); }
+.avatar-btn:hover { border-color:#fff; box-shadow:0 12px 26px rgba(0,0,0,.45); }
+.avatar-hero { font-size:40px; line-height:1; }
+.avatar-name { font-size:12px; opacity:.9; margin-top:6px; }
+.avatar-ft { display:flex; justify-content:flex-end; padding:12px 16px; border-top:1px solid rgba(255,255,255,.08); }
+
+/* Ensure glow sits behind content but above background */
+.over-setup-glow { z-index: 0; }
+.mm-cancel { background:transparent; border:1px solid var(--divider); color: var(--text); border-radius:999px; padding:6px 12px; cursor:pointer; }
+
+/* Responsive setup container and card width */
+.chess-setup-container { width: min(96vw, 1180px); margin: 0 auto; }
+.chess-setup-container .setup-col { max-width: clamp(320px, 92vw, 960px); margin-inline: auto; }
+
+/* Ensure saved game cards don’t look cramped on larger screens */
+.chess-setup-container .saved-list { max-width: 100%; }
+.chess-setup-container .saved-list { display: grid; grid-template-columns: 1fr; gap: 8px; }
+@media (min-width: 1200px) {
+	.chess-setup-container .saved-list { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+}
+.chess-setup-container .saved-card { 
+	background: linear-gradient(135deg, rgba(34,197,94,.12), rgba(20,184,166,.08));
+	border: 1px solid rgba(255,255,255,.10);
+	border-radius: 12px;
+	box-shadow: 0 8px 24px rgba(0,0,0,.35), inset 0 1px 0 rgba(255,255,255,.05);
+	transition: transform .15s ease, box-shadow .15s ease, border-color .15s ease;
+}
+.chess-setup-container .saved-card:hover {
+	transform: translateY(-2px);
+	box-shadow: 0 12px 30px rgba(0,0,0,.45), inset 0 1px 0 rgba(255,255,255,.07);
+	border-color: rgba(255,255,255,.16);
+}
+.chess-setup-container .name-pill {
+	padding: 2px 10px; border-radius: 999px;
+	background: rgba(255,255,255,.06);
+	border: 1px solid rgba(255,255,255,.14);
+	display: inline-flex; align-items: center; gap: 6px;
+}
+.chess-setup-container .name-pill i { opacity: .9; }
+.chess-setup-container .saved-meta { color: rgba(255,255,255,.75); }
+.chess-setup-container .saved-actions { display:flex; gap:8px; margin-left:auto; }
+@media (max-width: 520px){ .chess-setup-container .saved-actions { width:100%; margin-left:0; margin-top:8px; } }
+
+/* Mobile: disable expensive blur and lighten shadows */
+@media (max-width: 640px) {
+	.chess-setup-container .saved-card {
+		backdrop-filter: none;
+		box-shadow: 0 6px 16px rgba(0,0,0,.28), inset 0 1px 0 rgba(255,255,255,.04);
+		background: linear-gradient(135deg, rgba(34,197,94,.10), rgba(20,184,166,.06));
+	}
+}
+
+/* 2D Chess: pre-game full-bleed with square edges and no x-scroll (inherit shared styles) */
+@media (max-width: 640px){
+	.cf-chess .app-content { padding: 0 !important; overflow-x: hidden; }
+	.cf-chess .prejoin-float { margin: 0 !important; width: 100% !important; }
+	.cf-chess .gs-wrap { position: static !important; left: auto !important; right: auto !important; margin-left: 0 !important; margin-right: 0 !important; width: 100% !important; padding: 0 !important; min-height: calc(100dvh - var(--nav-h) - var(--footer-h, 0px)) !important; display: grid; place-items: center; }
+	.cf-chess .gs-card { border-radius: 0 !important; width: 100% !important; max-width: 100% !important; }
+	.cf-chess .gs-top-glow { width: 100% !important; left: 0 !important; transform: none !important; }
+}
+
+/* Make the pregame main area fill the viewport height exactly */
+.cf-chess .app-content:not(.app-content--full){
+	min-height: calc(100dvh - var(--nav-h) - var(--footer-h, 0px));
+}
+
+/* Board fullwrap overrides for mobile safety */
+@media (max-width: 480px) {
+	.board-fullwrap { height: calc(100dvh - var(--nav-h) - var(--footer-h, 0px)); }
+}
+
+/* Chess fullscreen board: subtract footer height to prevent vertical scroll */
+.cf-screen .board-fullwrap { height: calc(100dvh - var(--nav-h) - var(--footer-h, 0px)); }
+
+/* Bottom padding: none for full-board, safe-area for pre-game */
+.cf-chess .app-content.app-content--full { padding-bottom: 0 !important; }
+.cf-chess .app-content:not(.app-content--full) { padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 16px) !important; }
+
+/* Reduce page scroll jank during canvas gestures */
+.cf-screen .board-shell, .cf-screen canvas {
+	touch-action: none;
+	overscroll-behavior: contain;
+}
+
+/* Waiting overlay parity with 3D Chess */
+.cf-chess .waiting-overlay { background: rgba(9,12,18, .45); backdrop-filter: blur(2px); -webkit-backdrop-filter: blur(2px); }
+.cf-chess .popup-card{
+	width: min(92vw, 520px);
+	background: rgba(17,24,39,.85);
+	border: 1px solid rgba(255,255,255,.15);
+	color: #fff; border-radius: 14px;
+	box-shadow: 0 8px 28px rgba(0,0,0,.45);
+	padding: 18px 18px 14px;
+	backdrop-filter: blur(8px);
+	z-index: 8;
+}
+.cf-chess .popup-title{ font-size: 28px; font-weight: 800; letter-spacing: .06em; text-align:center; margin-bottom: 8px; }
+.cf-chess .popup-body{ text-align:center; color:#cbd5e1; margin-bottom: 12px; }
+.cf-chess .popup-actions{ display:flex; gap: 10px; justify-content:center; }

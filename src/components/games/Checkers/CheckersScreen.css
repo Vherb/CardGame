@@ -1,0 +1,161 @@
+/* ===== Connect Four visual skin, adapted for Checkers ===== */
+
+/* Base */
+html, body, #root { background: var(--bg-body); color: var(--text); -webkit-tap-highlight-color: transparent; }
+
+:root { --nav-h: 64px; }
+@media (min-width: 992px) { :root { --nav-h: 92px; } }
+
+.cf-screen {
+	min-height: 100dvh;
+	background: var(--bg-body);
+	color: var(--text);
+}
+.nav-spacer { height: var(--nav-h); }
+.app-content { position: relative; min-height: calc(100dvh - var(--nav-h) - var(--footer-h, 0px)); overflow-y: auto; -webkit-overflow-scrolling: touch; padding: 12px; }
+.app-content--full { padding: 0; overflow: hidden; height: calc(100dvh - var(--nav-h) - var(--footer-h, 0px)); }
+/* Pre-game: add a small safe-area bottom pad so content doesn't hit OS chrome (applies on phone and desktop) */
+.cf-checkers .app-content:not(.app-content--full) { padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 16px) !important; }
+.app-content--full .board-card-wrap { margin-bottom: 0 !important; }
+
+/* Over-setup purple glow, sitting behind the setup card */
+.over-setup-glow { position:absolute; left:50%; transform:translateX(-50%); top: -12px; width: min(1200px, 95vw); height: 140px; pointer-events:none; z-index: 0; }
+.over-setup-glow::before { content:""; position:absolute; inset:-20px -120px -40px; border-radius: 999px; background: radial-gradient(60% 100% at 50% 0%, rgba(255,110,220,0.55), rgba(255,110,220,0.18) 55%, rgba(255,110,220,0) 75%); filter: blur(8px); }
+.over-setup-glow::after { content:""; position:absolute; left:-20%; right:-20%; top:0; height:6px; background: linear-gradient(90deg, rgba(255,255,255,0) 0%, rgba(255,255,255,.18) 50%, rgba(255,255,255,0) 100%); mix-blend-mode: screen; opacity: .55; }
+
+/* Embedded mode parity */
+.cf-embed .nav-spacer,
+.cf-embed .cf-hero { display: none !important; }
+
+/* Board container */
+.board-card-wrap { position: relative; margin-bottom: 120px; overflow: visible; }
+.board-outer { width: 100%; }
+.board-wrap { width: 100%; max-width: min(720px, 100vw - 16px); margin-inline: auto; box-sizing: border-box; padding-top: 6px; }
+.cf-stage { perspective: 1000px; perspective-origin: 50% 20%; }
+.board-frame { position: relative; transform: translateZ(0) rotateX(4deg) translateY(2px); transform-style: preserve-3d; }
+.board-skin {
+	position: relative;
+	background:
+		repeating-linear-gradient(45deg, rgba(255,255,255,.02) 0 2px, transparent 2px 6px),
+		repeating-linear-gradient(-45deg, rgba(0,0,0,.04) 0 2px, transparent 2px 6px),
+		linear-gradient(180deg, rgba(255,255,255,.06), rgba(0,0,0,.08)),
+		linear-gradient(180deg, #3e83f1, #1b55db);
+	border-radius: 14px;
+	padding: 12px; /* inner padding around board */
+	box-shadow: inset 0 8px 20px rgba(0,0,0,.35), 0 18px 34px rgba(0,0,0,.42), 0 2px 0 rgba(255,255,255,.18);
+	z-index: 0;
+}
+.board-glint { position:absolute; inset:0; pointer-events:none; border-radius:14px; background:
+	radial-gradient(120% 60% at 50% -10%, rgba(255,255,255,.14), transparent 55%),
+	radial-gradient(60% 30% at 20% 0%, rgba(255,255,255,.07), transparent 60%),
+	radial-gradient(60% 30% at 80% 0%, rgba(255,255,255,.07), transparent 60%); z-index: 0; }
+
+/* Wooden stand */
+.board-stand { position: relative; width: 94%; height: 28px; margin: -2px auto 0; border-radius: 12px; background: linear-gradient(180deg, #b47a3c, #8b5a2b); box-shadow: inset 0 2px 0 rgba(255,255,255,.18), inset 0 -8px 12px rgba(0,0,0,.35), 0 12px 28px rgba(0,0,0,.45); }
+.board-stand::before, .board-stand::after { content:""; position:absolute; bottom:-12px; width:26%; height:16px; border-radius:10px; background: linear-gradient(180deg, #8b5a2b, #5a3b1f); box-shadow: inset 0 2px 0 rgba(255,255,255,.1), inset 0 -6px 10px rgba(0,0,0,.35), 0 10px 20px rgba(0,0,0,.35); }
+.board-stand::before { left:6%; transform: skewX(-10deg); } .board-stand::after { right:6%; transform: skewX(10deg); }
+
+/* Turn toast */
+.turn-toast { position:absolute; top:-12px; left:50%; transform:translateX(-50%); background: rgba(17,24,39,.92); color:#fff; padding:.3rem .5rem; border-radius:.5rem; font-weight:700; font-size:.8rem; line-height:1; box-shadow:0 6px 18px rgba(0,0,0,.25); pointer-events:none; }
+
+/* Chips / badges row */
+.badge-row { display: flex; flex-wrap: wrap; gap: .4rem; width: 100%; justify-content: center; margin-bottom: 8px; }
+.badge-chip { display:inline-flex; align-items:center; gap:.4rem; padding:.28rem .55rem; border-radius:999px; background: rgba(255,255,255,.18); color:#fff; font-weight:700; line-height:1; font-size:.9rem; }
+
+/* Full board stage, no container */
+.board-fullwrap { position: relative; width: 100%; height: calc(100dvh - var(--nav-h) - var(--footer-h, 0px)); margin: 0; padding: 0; overflow: hidden; }
+.board-fullwrap .badge-row { position: absolute; top: 8px; left: 0; right: 0; margin: 0 auto; z-index: 2; padding: 0 10px; }
+.board-shell { position: absolute; inset: 0; top: 44px; /* leave space for badges */ background: var(--panel-bg); }
+.board-shell canvas { display: block; width: 100% !important; height: 100% !important; }
+
+/* Login overlay styles moved to shared component CSS */
+
+/* Matchmaking modal parity */
+.match-overlay { position: fixed; inset: 0; z-index: 1050; display: grid; place-items: center; background: rgba(9,12,18,.55); backdrop-filter: blur(2px); -webkit-backdrop-filter: blur(2px); padding: 16px; overflow: auto; box-sizing: border-box; }
+.match-card { width: 100%; max-width: 860px; background: var(--card-bg); border:1px solid var(--card-border); color: var(--text); border-radius:16px; box-shadow:0 1.25rem 2.5rem rgba(0,0,0,.35); overflow:hidden; }
+.match-header { display:flex; align-items:center; justify-content:space-between; gap:.75rem; padding:.8rem 1rem; background: linear-gradient(120deg, #6d28d9, #2563eb, #06b6d4); color:#fff; }
+.match-body { display:grid; grid-template-columns: 1fr 40px 1fr; align-items: stretch; gap: 16px; padding: 16px; box-sizing: border-box; max-width: 100%; }
+.match-col { padding:.75rem; display:grid; align-content:center; gap:.75rem; text-align:center; min-width: 0; }
+.match-divider { display:grid; place-items:center; color:rgba(255,255,255,.85); font-weight:900; letter-spacing:.5px; white-space: nowrap; }
+.mm-avatar { width: clamp(84px, 18vw, 120px); height: clamp(84px, 18vw, 120px); border-radius:999px; margin-inline:auto; display:grid; place-items:center; background:#0b1220; box-shadow: 0 10px 22px rgba(0,0,0,.35), inset 0 2px 0 rgba(255,255,255,.06); border:3px solid rgba(255,255,255,.4); color:#0f172a; font-weight:900; font-size: clamp(40px, 8vw, 64px); }
+.mm-pill { display:inline-flex; align-items:center; gap:.4rem; padding:.28rem .55rem; border-radius:999px; background: rgba(255,255,255,.10); color:#fff; font-weight:800; font-size:.9rem; line-height:1; max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
+.mm-swab { display:inline-block; width:12px; height:12px; border-radius:999px; border:1px solid rgba(0,0,0,.25); }
+.mm-cancel { background:transparent; color:#e5e7eb; border:1px solid rgba(255,255,255,.25); padding:.45rem .8rem; border-radius:.6rem; font-weight:800; }
+.mm-dots { display:flex; gap:6px; align-items:center; justify-content:center; }
+.mm-dot { width:6px; height:6px; border-radius:50%; background: rgba(255,255,255,.9); opacity:.75; animation: blink 1.3s ease-in-out infinite; }
+.mm-dot:nth-child(2){ animation-delay:.2s } .mm-dot:nth-child(3){ animation-delay:.4s }
+@keyframes blink { 0%,80%,100%{opacity:.25;transform:translateY(0)} 40%{opacity:1;transform:translateY(-1px)} }
+
+/* Footer area for matchmaking modal */
+.mm-footer{ margin: 6px 10px 12px; display:flex; justify-content:center; }
+
+/* Avatar picker */
+.avatar-modal { position: fixed; inset: 0; z-index: 1060; display: grid; place-items: center; background: rgba(5, 8, 14, 0.6); backdrop-filter: blur(2px); -webkit-backdrop-filter: blur(2px); }
+.avatar-card { width: min(720px, 94vw); background: var(--card-bg); border: 1px solid var(--card-border); color: var(--text); border-radius:16px; box-shadow:0 1.25rem 2.5rem rgba(0,0,0,.35); overflow:hidden; }
+.avatar-hd { display:flex; align-items:center; justify-content:space-between; gap:.75rem; padding:.9rem 1rem; background: linear-gradient(120deg, #9333ea, #2563eb); color:#fff; }
+.avatar-grid { display:grid; grid-template-columns: repeat(4, minmax(0,1fr)); gap: 14px; padding: 16px; }
+.avatar-btn { display:grid; place-items:center; padding: 10px; background: transparent; border: 1px solid var(--divider); border-radius: 12px; cursor: pointer; }
+.avatar-hero { width: clamp(72px, 10vw, 96px); height: clamp(72px, 10vw, 96px); border-radius: 999px; display: grid; place-items:center; background: #0b1220; border: 3px solid rgba(255,255,255,.45); box-shadow: 0 8px 18px rgba(0,0,0,.35), inset 0 2px 0 rgba(255,255,255,.06); font-size: clamp(38px, 6.8vw, 54px); line-height: 1; }
+
+/* Misc */
+.br-12{border-radius:12px}
+
+/* Mobile tweaks */
+@media (max-width: 600px) {
+	.board-wrap  { max-width: 100vw !important; padding-left: 0 !important; padding-right: 0 !important; }
+}
+
+/* Checkers pre-game: full-bleed on phones with square corners and no x-scroll */
+@media (max-width: 640px){
+	.cf-checkers .app-content { padding: 0 !important; overflow-x: hidden; }
+	.cf-checkers .prejoin-float { margin: 0 !important; width: 100% !important; }
+	.cf-checkers .gs-wrap { position: static !important; left: auto !important; right: auto !important; margin-left: 0 !important; margin-right: 0 !important; width: 100% !important; padding: 0 !important; min-height: calc(100dvh - var(--nav-h) - var(--footer-h, 0px)) !important; display: grid; place-items: center; }
+	.cf-checkers .gs-card { border-radius: 0 !important; width: 100% !important; max-width: 100% !important; }
+	.cf-checkers .gs-top-glow { width: 100% !important; left: 0 !important; transform: none !important; }
+}
+
+/* Prevent horizontal overflow on small screens for these games */
+@media (max-width: 768px) {
+	.cf-checkers .app-content,
+	.cf-chess .app-content,
+	.cf-raum .app-content {
+		overflow-x: hidden;
+	}
+	.cf-checkers,
+	.cf-chess,
+	.cf-raum {
+		overflow-x: hidden;
+	}
+}
+
+/* Saved games list (match Connect Four) */
+.saved-list { display: grid; grid-template-columns: 1fr; gap: 8px; }
+/* Ensure the last saved card isn't flush to the screen edge */
+.saved-list { padding-bottom: 8px; }
+@media (min-width: 992px) { .saved-list { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; } }
+.saved-card { display:flex; align-items:center; gap: 10px; padding: 10px 12px; border-radius: 12px; border: 1px solid var(--card-border); background: var(--card-bg); box-shadow: 0 6px 18px rgba(0,0,0,.18), inset 0 1px 0 rgba(255,255,255,.04); transition: transform .12s ease, box-shadow .12s ease, border-color .12s ease; }
+.saved-card:hover { transform: translateY(-2px); box-shadow: 0 12px 30px rgba(0,0,0,.28), inset 0 1px 0 rgba(255,255,255,.06); border-color: var(--divider); }
+.saved-meta { color: var(--muted); }
+.saved-actions { display:flex; gap:8px; margin-left:auto; flex-wrap: wrap; }
+@media (max-width: 520px){ .saved-actions { width:100%; margin-left:0; margin-top:8px; } }
+@media (max-width: 360px){ .saved-actions .btn { flex:1 1 auto; min-width: 0; } }
+
+/* Name pill (match Chess/Connect Four) */
+.name-pill { padding: 2px 10px; border-radius: 999px; background: rgba(255,255,255,.06); border: 1px solid rgba(255,255,255,.14); display: inline-flex; align-items: center; gap: 6px; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.name-pill i { opacity: .9; }
+
+/* Waiting overlay parity (match Chess/Raumschach) */
+.cf-checkers .waiting-overlay { background: rgba(9,12,18, .45); backdrop-filter: blur(2px); -webkit-backdrop-filter: blur(2px); }
+.cf-checkers .popup-card{
+	width: min(92vw, 520px);
+	background: rgba(17,24,39,.85);
+	border: 1px solid rgba(255,255,255,.15);
+	color: #fff; border-radius: 14px;
+	box-shadow: 0 8px 28px rgba(0,0,0,.45);
+	padding: 18px 18px 14px;
+	backdrop-filter: blur(8px);
+	z-index: 8;
+}
+.cf-checkers .popup-title{ font-size: 28px; font-weight: 800; letter-spacing: .06em; text-align:center; margin-bottom: 8px; }
+.cf-checkers .popup-body{ text-align:center; color:#cbd5e1; margin-bottom: 12px; }
+.cf-checkers .popup-actions{ display:flex; gap: 10px; justify-content:center; }

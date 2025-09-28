@@ -8,14 +8,13 @@ import "bootstrap/dist/css/bootstrap.min.css";
 
 /** Resolve API base so it works on phone via LAN IP (e.g. 192.168.x.x) */
 function resolveApiBase() {
-  // 1) If provided, honor the env var
   if (process.env.REACT_APP_API_BASE) return process.env.REACT_APP_API_BASE;
-
-  // 2) Otherwise, match the current host/IP and use port 3002
-  //    e.g. http://192.168.50.123:3002 when the app is at http://192.168.50.123:3000
   const { protocol, hostname } = window.location;
-  // If you're reverse-proxying your API at /api on the same origin, you can return `${protocol}//${hostname}/api`
-  return `${protocol}//${hostname}:3002`;
+  const envHost = (process.env.REACT_APP_SERVER_HOST || '').trim();
+  const winHost = (window.SERVER_HOST ? String(window.SERVER_HOST).trim() : '');
+  let lsHost = ''; try { lsHost = (localStorage.getItem('serverHost') || '').trim(); } catch {}
+  const host = envHost || winHost || lsHost || hostname;
+  return `${protocol}//${host}:3002`;
 }
 const API = resolveApiBase();
 
@@ -83,10 +82,11 @@ function Registration({ onAuthed }) {
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data?.message || `HTTP ${res.status}`);
 
-      localStorage.setItem("token", data.token);
-      localStorage.setItem("username", data.username);
+  localStorage.setItem("token", data.token);
+  localStorage.setItem("username", data.username);
+  if (data.userId != null) localStorage.setItem("userId", String(data.userId));
 
-      if (onAuthed) onAuthed({ username: data.username, token: data.token });
+  if (onAuthed) onAuthed({ username: data.username, token: data.token, userId: data.userId });
 
       // go home
       window.location.replace("/");

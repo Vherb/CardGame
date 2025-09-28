@@ -1,0 +1,136 @@
+:root {
+  /* Core palette (Neon / Dark default) */
+  --bg-body: radial-gradient(60% 80% at 50% 10%, #121212 0%, #0b0b0b 55%, #060606 75%, #000 100%);
+  --text: #eaf1ff;
+  --muted: #b0bfdc;
+  --link: #bfcff8;
+  --link-hover: #ffffff;
+
+  --nav-bg: #0b0f14;
+  --nav-border: rgba(255,255,255,0.08);
+  --footer-bg: #0b0f14;
+  --footer-border: rgba(255,255,255,0.06);
+  --surface-shadow: 0 -6px 20px rgba(0,0,0,.35);
+  --divider: rgba(255,255,255,0.08);
+  --panel-bg: rgba(8,10,14,0.95);
+
+    /* Table/felt tokens — dark is black with subtle depth (no blue) */
+    --table-bg: linear-gradient(180deg, #151515, #0a0a0a);
+    --felt: #0b0b0b;           /* near-black felt */
+    --felt-hi: #1a1a1a;
+    --felt-lo: #000000;
+
+  /* Buttons/inputs/cards tokens */
+  --btn-bg: linear-gradient(180deg, #1f2937, #0f172a);
+  --btn-text: #ffffff;
+  --btn-border: rgba(255,255,255,0.15);
+  --btn-hover: #1f2a44;
+  --btn-outline: rgba(191,207,248,0.8);
+
+  --card-bg: rgba(10, 15, 30, 0.75);
+  --card-border: rgba(255,255,255,0.08);
+
+  --input-bg: rgba(255,255,255,0.06);
+  --input-text: var(--text);
+  --input-border: rgba(255,255,255,0.2);
+  --input-placeholder: rgba(234,241,255,0.6);
+
+  --led-color: rgba(255,110,220,0.95);
+  --global-led-speed: 4s; /* default animation speed */
+}
+
+[data-theme="day"] {
+  --bg-body: linear-gradient(180deg, #ffffff, #f7f8fb);
+  --text: #101828;
+  --muted: #475467;
+  --link: #155EEF;
+  --link-hover: #1D4ED8;
+
+  --nav-bg: #ffffff;
+  --nav-border: rgba(16,24,40,0.08);
+  --footer-bg: #ffffff;
+  --footer-border: rgba(16,24,40,0.08);
+  --surface-shadow: 0 -4px 18px rgba(0,0,0,.08);
+  --divider: rgba(16,24,40,0.08);
+  --panel-bg: rgba(255,255,255,0.96);
+
+    /* Day theme: casino green felt */
+    --table-bg: linear-gradient(180deg, #ffffff, #f7f8fb);
+    --felt: #2E7D32;           /* casino green */
+    --felt-hi: #43A047;
+    --felt-lo: #1B5E20;
+
+  --btn-bg: #f3f4f6;
+  --btn-text: #0b1220;
+  --btn-border: rgba(0,0,0,0.1);
+  --btn-hover: #e5e7eb;
+  --btn-outline: rgba(13,71,161,0.75);
+
+  --card-bg: #ffffff;
+  --card-border: rgba(16,24,40,0.08);
+
+  --input-bg: #ffffff;
+  --input-text: #101828;
+  --input-border: rgba(16,24,40,0.18);
+  --input-placeholder: #667085;
+
+  --led-color: rgba(99,102,241,0.55);
+}
+
+/* Global application background using variables */
+html, body, #root {
+  background: var(--bg-body) !important;
+  color: var(--text);
+}
+
+/* Theming helpers for content */
+a { color: var(--link); }
+a:hover { color: var(--link-hover); }
+
+/* Day theme: hide some heavy neon accents by default */
+[data-theme="day"] .led-topbar { display: none !important; }
+[data-theme="day"] .nav-led-rail { display: none !important; }
+
+/* High-contrast component overrides (Bootstrap-compatible) */
+.card, .modal-content, .offcanvas, .dropdown-menu {
+  background: var(--card-bg) !important;
+  color: var(--text) !important;
+  border-color: var(--card-border) !important;
+}
+/* Dropdowns: ensure menu/link text is white in neon and readable in day theme */
+.dropdown-menu { box-shadow: 0 10px 30px rgba(0,0,0,.35) !important; backdrop-filter: none !important; -webkit-backdrop-filter: none !important; }
+.dropdown-item { color: var(--text) !important; }
+.dropdown-item:hover, .dropdown-item:focus { background: rgba(255,255,255,.08) !important; color: #fff !important; }
+
+/* If any dropdown backdrop from Bootstrap/offcanvas is injected, neutralize it */
+.dropdown-backdrop, .offcanvas-backdrop, .modal-backdrop.show { background: rgba(0,0,0,0.45) !important; }
+/* But do not dim the whole page for NavDropdown: scope backdrop off when inside navbar */
+.app-navbar + .dropdown-backdrop, .app-navbar .dropdown-backdrop { display: none !important; }
+
+.list-group-item { background: transparent; color: var(--text); border-color: var(--divider); }
+.table { color: var(--text); }
+.table thead th { border-bottom-color: var(--divider); }
+.table tbody td { border-top-color: var(--divider); }
+
+/* Buttons */
+.btn, button {
+  color: var(--btn-text) !important;
+  border-color: var(--btn-border) !important;
+}
+.btn-outline-light, .btn-outline-dark, .btn-outline-primary, .btn-outline-secondary {
+  color: var(--btn-outline) !important;
+  border-color: var(--btn-outline) !important;
+}
+.btn:hover, button:hover { filter: brightness(1.03); }
+
+/* Inputs */
+input, select, textarea, .form-control, .form-select {
+  background: var(--input-bg) !important;
+  color: var(--input-text) !important;
+  border-color: var(--input-border) !important;
+}
+input::placeholder, textarea::placeholder { color: var(--input-placeholder) !important; }
+
+/* Nav/Footer */
+.navbar, .app-navbar { background: var(--nav-bg) !important; border-color: var(--nav-border) !important; }
+footer, .app-footer { background: var(--footer-bg) !important; border-color: var(--footer-border) !important; box-shadow: var(--surface-shadow) !important; }

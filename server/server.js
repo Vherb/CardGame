@@ -8,6 +8,7 @@ const bcrypt = require("bcrypt");
 const cors = require("cors");
 const jwt = require("jsonwebtoken");
 const { generateToken } = require("./jwt");
+const JWT_SECRET = process.env.JWT_SECRET || "1234";
 
 let _fetch = global.fetch;
 if (typeof _fetch !== "function") {
@@ -162,11 +163,11 @@ function maxSpendableRounded(asset, bal) {
 
 /* -------------------- DB -------------------- */
 const db = mysql.createPool({
-  host: "127.0.0.1",
-  user: "root",
-  password: "",
-  database: "game",
-  port: 3306,
+  host: process.env.MYSQL_HOST || "127.0.0.1",
+  user: process.env.MYSQL_USER || "root",
+  password: process.env.MYSQL_PASSWORD || "",
+  database: process.env.MYSQL_DB || "game",
+  port: Number(process.env.MYSQL_PORT) || 3306,
   connectionLimit: 10,
 });
 db.getConnection((err, conn) => {
@@ -176,6 +177,13 @@ db.getConnection((err, conn) => {
   }
   console.log("Connected to the database");
   conn.release();
+  // DB health check
+  app.get('/health/db', (_req, res) => {
+    db.query('SELECT 1 AS ok', (err, rows) => {
+      if (err) return res.status(500).json({ ok: false, error: String(err.message||err) });
+      res.json({ ok: true, row: rows && rows[0] ? rows[0] : null });
+    });
+  });
 });
 
 db.query(
@@ -201,13 +209,21 @@ db.query(
   }
 );
 
+// Simple key-value app config for global settings
+db.query(
+  "CREATE TABLE IF NOT EXISTS app_config (k VARCHAR(64) PRIMARY KEY, v TEXT NOT NULL)",
+  (e) => {
+    if (e) console.warn("CREATE app_config failed:", e.message);
+  }
+);
+
 /* -------------------- Auth -------------------- */
 function requireAuth(req, _res, next) {
   const auth = req.headers.authorization || "";
   const token = auth.startsWith("Bearer ") ? auth.slice(7) : null;
   if (!token) return _res.status(401).json({ message: "No token" });
   try {
-    const decoded = jwt.verify(token, "1234");
+    const decoded = jwt.verify(token, JWT_SECRET);
     req.user = decoded;
     next();
   } catch {
@@ -240,8 +256,9 @@ app.post("/registration", async (req, res) => {
               return res
                 .status(500)
                 .json({ message: "Registration failed due to a database issue" });
-            const token = generateToken({ username, email });
-            res.json({ token, username });
+            const userId = Number(r2.insertId) || undefined;
+            const token = generateToken({ userId, username, email });
+            res.json({ token, username, userId });
           }
         );
       }
@@ -264,8 +281,8 @@ app.post("/login", async (req, res) => {
       const user = rows[0];
       const ok = await bcrypt.compare(password, user.password);
       if (!ok) return res.status(400).json({ message: "Incorrect password" });
-      const token = generateToken({ username: user.username, email: user.email });
-      res.json({ token, username: user.username });
+      const token = generateToken({ userId: user.id, username: user.username, email: user.email });
+      res.json({ token, username: user.username, userId: user.id });
     }
   );
 });
@@ -273,7 +290,7 @@ app.post("/login", async (req, res) => {
 app.get("/me", requireAuth, (req, res) => {
   const { username } = req.user;
   db.query(
-    `SELECT username, email, sc_balance, public_key,
+    `SELECT id, username, email, sc_balance, public_key,
             xrp_address, eth_address, xrp_balance, eth_balance, xlm_balance
        FROM users WHERE username = ? LIMIT 1`,
     [username],
@@ -282,6 +299,7 @@ app.get("/me", requireAuth, (req, res) => {
       if (!rows.length) return res.status(404).json({ message: "User not found" });
       const u = rows[0];
       res.json({
+        userId: u.id,
         username: u.username,
         email: u.email,
         sc_balance: Number(u.sc_balance) || 0,
@@ -294,6 +312,35 @@ app.get("/me", requireAuth, (req, res) => {
       });
     }
   );
+});
+
+/* -------------------- Config: Checkers piece defaults -------------------- */
+const CHECKERS_DEFAULTS_KEY = "checkers_piece_defaults";
+const DEFAULTS_FALLBACK = { yOffset: -0.505, yScale: 1, zOffset: 0.12, xzScale: 0.75 };
+
+app.get("/config/checkers/piece-defaults", async (_req, res) => {
+  // Hardcoded global defaults for everyone
+  return res.json(DEFAULTS_FALLBACK);
+});
+
+app.post("/config/checkers/piece-defaults", requireAuth, (req, res) => {
+  try {
+    const b = req.body || {};
+    const cfg = {
+      yOffset: Number(b.yOffset) || 0,
+      yScale: Number(b.yScale) || 1,
+      zOffset: Number(b.zOffset) || 0,
+      xzScale: Number(b.xzScale) || 1,
+    };
+    const json = JSON.stringify(cfg);
+    const sql = "INSERT INTO app_config (k, v) VALUES (?, ?) ON DUPLICATE KEY UPDATE v = VALUES(v)";
+    db.query(sql, [CHECKERS_DEFAULTS_KEY, json], (e, r) => {
+      if (e) return res.status(500).json({ ok: false, message: "DB error" });
+      res.json({ ok: true, defaults: cfg });
+    });
+  } catch {
+    res.status(500).json({ ok: false, message: "Save failed" });
+  }
 });
 
 /* -------------------- Wallet attach & helpers -------------------- */
@@ -976,6 +1023,24 @@ app.post("/sc/withdraw/redeem", requireAuth, async (req, res) => {
   );
 });
 
-/* -------------------- Listen -------------------- */
-const port = process.env.PORT || 3002;
-app.listen(port, "0.0.0.0", () => console.log(`Server running on http://0.0.0.0:${port}`));
+/* -------------------- Unified WS mounting (Render single service) -------------------- */
+try {
+  if (process.env.UNIFIED_WS === '1') {
+    const http = require('http');
+    const server = http.createServer(app);
+    // Attach per-game WS servers to paths
+    try { require('../src/components/games/ConnectFour/server.js').attachUnified(server, '/ws/c4'); console.log('[unified] mounted /ws/c4'); } catch (e) { console.warn('C4 attach failed:', e?.message||e); }
+    try { require('../src/components/games/Checkers/server.js').attachUnified(server, '/ws/checkers'); console.log('[unified] mounted /ws/checkers'); } catch (e) { console.warn('Checkers attach failed:', e?.message||e); }
+    try { require('../src/components/games/Chess/server.js').attachUnified(server, '/ws/chess'); console.log('[unified] mounted /ws/chess'); } catch (e) { console.warn('Chess attach failed:', e?.message||e); }
+    try { require('../src/components/games/Chess3D/server.js').attachUnified(server, '/ws/raum'); console.log('[unified] mounted /ws/raum'); } catch (e) { console.warn('Raumschach attach failed:', e?.message||e); }
+    try { server.on('upgrade', (req)=>{ try{ console.log('[unified] upgrade', req.url); }catch{} }); } catch {}
+  const port = Number(process.env.PORT) || Number(process.env.API_PORT) || 3002;
+    server.listen(port, '0.0.0.0', () => console.log(`Unified API+WS on http://0.0.0.0:${port}`));
+  } else {
+  const port = Number(process.env.PORT) || Number(process.env.API_PORT) || 3002;
+    app.listen(port, '0.0.0.0', () => console.log(`Server running on http://0.0.0.0:${port}`));
+  }
+} catch {
+  const port = Number(process.env.PORT) || Number(process.env.API_PORT) || 3002;
+  app.listen(port, '0.0.0.0', () => console.log(`Server running on http://0.0.0.0:${port}`));
+}

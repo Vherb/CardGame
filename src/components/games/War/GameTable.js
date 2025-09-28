@@ -13,15 +13,17 @@ import './GameTable.css';
 import { motion, AnimatePresence } from 'framer-motion';
 import NavBar from "./../../NavBar";
 import CardReveal from './CardReveal.jsx';
+import LoginOverlay from './../../common/LoginOverlay';
+import GameSetup from './../../common/GameSetup';
+import QuickChat from '../common/QuickChat';
 
 /*************************
  * Config (WS + API base)
  *************************/
 const isSecure = typeof window !== 'undefined' && window.location.protocol === 'https:';
-const WS_URL = (process.env.REACT_APP_WAR_WS
-  || `${isSecure ? 'wss' : 'ws'}://${typeof window !== 'undefined' ? window.location.hostname : 'localhost'}:3001`);
-const API    = (process.env.REACT_APP_API_BASE
-  || `${isSecure ? 'https' : 'http'}://${typeof window !== 'undefined' ? window.location.hostname : 'localhost'}:3002`);
+const curHost = (()=>{ if(typeof window==='undefined') return 'localhost'; const envHost=(process.env.REACT_APP_SERVER_HOST||'').trim(); const winHost=(window.SERVER_HOST?String(window.SERVER_HOST).trim():''); let lsHost=''; try{ lsHost=(localStorage.getItem('serverHost')||'').trim(); }catch{} return envHost||winHost||lsHost||((window.location&&window.location.hostname)||'localhost'); })();
+const WS_URL = (process.env.REACT_APP_WAR_WS || `${isSecure ? 'wss' : 'ws'}://${curHost}:3001`);
+const API    = (process.env.REACT_APP_API_BASE || `${isSecure ? 'https' : 'http'}://${curHost}:3002`);
 
 /***********************
  * Points/Wallet helpers
@@ -78,16 +80,51 @@ function LedFrame({ children, color='rgba(255,110,220,0.9)', speed=2, rounded='1
  ****************/
 export default function GameTable({ embedded = false }) {
   const [ws, setWs] = useState(null);
+  const [wsConnected, setWsConnected] = useState(false);
   const [queued, setQueued] = useState(false);
   const [paired, setPaired] = useState(null); // {you, usernames, avatars, pointsPerRound}
   const [countdown, setCountdown] = useState(null);
   const [started, setStarted] = useState(false);
   const [playerNumber, setPlayerNumber] = useState(null);
 
-  const [username, setUsername] = useState(() => (typeof localStorage !== 'undefined' ? (localStorage.getItem('war_user') || '').slice(0, 16) : ''));
-  const [avatar, setAvatar] = useState(() => (typeof localStorage !== 'undefined' ? (localStorage.getItem('war_avatar') || 'rocket') : 'rocket'));
+  const [username, setUsername] = useState(() => (typeof localStorage !== 'undefined'
+    ? ((localStorage.getItem('username') || localStorage.getItem('war_user') || '').slice(0, 16))
+    : ''));
+  const [avatar, setAvatar] = useState(() => (typeof localStorage !== 'undefined'
+    ? (localStorage.getItem('profileAvatar') || localStorage.getItem('war_avatar') || 'rocket')
+    : 'rocket'));
   const [roundPoints, setRoundPoints] = useState(() => (typeof localStorage !== 'undefined' ? Number(localStorage.getItem('war_stake') || 1) || 1 : 1));
+  const [stakeText, setStakeText] = useState(() => {
+    try {
+      const s = (typeof localStorage !== 'undefined') ? Number(localStorage.getItem('war_stake') || 1) : 1;
+      const n = Math.max(0.01, Number.isFinite(s) ? s : 1);
+      return n.toFixed(2);
+    } catch { return '1.00'; }
+  });
   const [points, setPoints] = useState(0);
+
+  // Auth tracking (shared with other games)
+  const isAuthed = useCallback(() => {
+    try {
+      const t = (typeof localStorage !== 'undefined') ? localStorage.getItem('token') : '';
+      const u = (typeof localStorage !== 'undefined') ? localStorage.getItem('username') : '';
+      return !!(t && u);
+    } catch { return false; }
+  }, []);
+
+  // Keep numeric roundPoints in sync with editable stakeText
+  useEffect(() => {
+    const n = Math.max(0.01, Number(stakeText) || 0);
+    setRoundPoints(n);
+  }, [stakeText]);
+  const [authed, setAuthed] = useState(isAuthed());
+  useEffect(() => {
+    setAuthed(isAuthed());
+    const onAuth = () => setAuthed(isAuthed());
+    if (typeof window !== 'undefined') window.addEventListener('authchange', onAuth);
+    return () => { if (typeof window !== 'undefined') window.removeEventListener('authchange', onAuth); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Cards from server e.g. {rank:'A', suit:'♠'}
   const [p1Card, setP1Card] = useState(null);
@@ -99,50 +136,42 @@ export default function GameTable({ embedded = false }) {
   const [matchWinner, setMatchWinner] = useState(null);
   const [canDeal, setCanDeal] = useState(false);
   const [warDepth, setWarDepth] = useState(0);
+  const [chatFeed, setChatFeed] = useState([]);
 
-  // Accounting refs keyed by card pairs
-  const lockedMatchRef = useRef(0);          // match-level lock (neutral)
+  // Match-level staking (lock once at start; settle on game over)
+  const lockedStakeRef = useRef(0);
   const settledOnceRef = useRef(false);
-  const deductedKeysRef = useRef(new Set()); // card-pair keys we've deducted for
-  const paidKeysRef = useRef(new Set());     // card-pair keys we've credited for
-
-  // Derive round key
-  const makeRoundKey = (msg) => {
-    const a = msg?.p1Card, b = msg?.p2Card;
-    if (!a || !b || !a.rank || !a.suit || !b.rank || !b.suit) return null;
-    return `${a.rank}${a.suit}-${b.rank}${b.suit}`; // deterministic for both clients
-  };
 
   /** Points */
   useEffect(() => { (async()=>{ try { setPoints(await getPoints()); } catch {} })(); }, []);
-  const lockMatch = useCallback(async (amt) => {
+  const lockStake = useCallback(async (amt) => {
     const a = Math.max(0.01, Number(amt)||0);
-    if (lockedMatchRef.current > 0) return true;
+    if (lockedStakeRef.current > 0) return true;
     const bal = await getPoints().catch(()=>0);
     if (bal < a) { alert(`Not enough points. You have ${bal.toFixed(2)}, need ${a.toFixed(2)}.`); return false; }
-    try { const j = await adjustPoints(-a, 'Gambit War — lock match'); lockedMatchRef.current = a; setPoints(Number(j.sc_balance)||0); return true; }
+    try { const j = await adjustPoints(-a, 'Gambit War — lock stake'); lockedStakeRef.current = a; setPoints(Number(j.sc_balance)||0); return true; }
     catch (e) { alert(e.message || 'Could not lock.'); return false; }
   }, []);
-  const refundMatch = useCallback(async (reason='refund') => {
-    const a = lockedMatchRef.current;
+  const refundStake = useCallback(async (reason='refund') => {
+    const a = lockedStakeRef.current;
     if (a > 0) {
       try { const j = await adjustPoints(+a, `Gambit War — ${reason}`); setPoints(Number(j.sc_balance)||0); } catch {}
-      lockedMatchRef.current = 0;
+      lockedStakeRef.current = 0;
     }
   }, []);
 
-  // Per-round points helpers
-  const deductForKey = useCallback(async (amt, key) => {
+  // Settlement helper
+  const settleWin = useCallback(async (myStake, oppStake) => {
+    const credit = Number(myStake||0) + Number(oppStake||0);
+    if (credit <= 0) { lockedStakeRef.current = 0; return; }
     try {
-      const j = await adjustPoints(-amt, `Gambit War — round ${key}`);
-      setPoints(Number(j.sc_balance) || 0);
-    } catch (e) { console.warn('Deduction failed:', e); }
-  }, []);
-  const creditForKey = useCallback(async (amt, key) => {
-    try {
-      const j = await adjustPoints(+amt, `Gambit War — win ${key}`);
-      setPoints(Number(j.sc_balance) || 0);
-    } catch (e) { console.warn('Credit failed:', e); }
+      const j = await adjustPoints(+credit, 'Gambit War — win payout');
+      setPoints(Number(j.sc_balance)||0);
+    } catch (e) {
+      // fallback: at least restore my locked stake to avoid being stuck
+      try { const j2 = await adjustPoints(+Number(myStake||0), 'Gambit War — payout fallback refund'); setPoints(Number(j2.sc_balance)||0); } catch {}
+    }
+    lockedStakeRef.current = 0;
   }, []);
 
   /****************
@@ -151,33 +180,20 @@ export default function GameTable({ embedded = false }) {
   const connect = useCallback(() => {
     const sock = new WebSocket(WS_URL);
     setWs(sock);
+    sock.onopen = () => setWsConnected(true);
 
     sock.onmessage = (e) => {
       const msg = JSON.parse(e.data);
-
       if (msg.type === 'queued') { setQueued(true); return; }
-
-      if (msg.type === 'paired') {
-        setPaired({ you: msg.you, usernames: msg.usernames, avatars: msg.avatars, pointsPerRound: msg.stakes });
-        setQueued(false);
-        deductedKeysRef.current.clear();
-        paidKeysRef.current.clear();
+      if (msg.type === 'paired') { setPaired({ you: msg.you, usernames: msg.usernames, avatars: msg.avatars, pointsPerRound: msg.stakes }); setQueued(false); return; }
+      if (msg.type === 'quickChat'){
+        const youRole = (playerNumber === 1 ? 'Player 1' : (playerNumber === 2 ? 'Player 2' : 'Player 1'));
+        const from = msg.from === youRole ? 'you' : (msg.from||'opp');
+        setChatFeed(prev => [...prev, { from, username: msg.username, text: String(msg.text||'').slice(0,80), ts: Number(msg.ts)||Date.now() }].slice(-12));
         return;
       }
-
       if (msg.type === 'countdown') { setCountdown(msg.value); return; }
-
-      if (msg.type === 'startGame') {
-        setStarted(true);
-        setPlayerNumber(msg.playerNumber);
-        setScores(msg.scores || { 'Player 1':0, 'Player 2':0 });
-        setRound(msg.currentRound || 0);
-        setCountdown(null);
-        deductedKeysRef.current.clear();
-        paidKeysRef.current.clear();
-        return;
-      }
-
+      if (msg.type === 'startGame') { setStarted(true); setChatFeed([]); setPlayerNumber(msg.playerNumber); setScores(msg.scores || { 'Player 1':0, 'Player 2':0 }); setRound(msg.currentRound || 0); setCountdown(null); settledOnceRef.current = false; (async()=>{ const s = paired?.pointsPerRound || {}; const myRole = (msg.playerNumber===1?'Player 1':'Player 2'); const myStake = Number(s[myRole] ?? roundPoints) || Number(roundPoints)||0; if (lockedStakeRef.current<=0) await lockStake(myStake); })(); return; }
       if (msg.type === 'turn') { setCanDeal(!!msg.canDeal); return; }
 
       if (msg.type === 'round') {
@@ -189,50 +205,25 @@ export default function GameTable({ embedded = false }) {
         setRound(Number(msg.round || 0));
         setWarDepth(Number(msg.warDepth || 0));
         if (msg.matchWinner) setMatchWinner(msg.matchWinner);
-
-        // Roles & per-round points
-        const myRole  = (playerNumber === 1) ? 'Player 1' : (playerNumber === 2 ? 'Player 2' : null);
-        if (!myRole) return;
-        const oppRole = (myRole === 'Player 1') ? 'Player 2' : 'Player 1';
-        const sFromServer = msg.stakes || paired?.pointsPerRound || {};
-        const myPts = Number(sFromServer[myRole] ?? roundPoints) || 0;
-        const oppPts = Number(sFromServer[oppRole] ?? myPts) || 0;
-
-        const key = makeRoundKey(msg);
-        const atRoot = Number(msg.warDepth||0) === 0;
-
-        // 1) Deduct once per fresh round
-        if (key && atRoot && !deductedKeysRef.current.has(key) && myPts > 0) {
-          deductedKeysRef.current.add(key);
-          (async () => { await deductForKey(myPts, key); })();
-        }
-        // 2) Credit winner once when resolved
-        if (key && atRoot && msg.roundWinner && !paidKeysRef.current.has(key)) {
-          paidKeysRef.current.add(key);
-          if (msg.roundWinner === myRole) {
-            (async () => { await creditForKey(myPts + oppPts, key); })();
-          }
-        }
         return;
       }
 
       if (msg.type === 'gameOver') {
         setMatchWinner(msg.winner || null);
         setScores(msg.scores || scores);
-
-        // Return match lock to winner
+        // Settle stakes once: winner receives both stakes; loser loses locked stake
         if (!settledOnceRef.current && msg.winner) {
           settledOnceRef.current = true;
           const myRole = playerNumber === 1 ? 'Player 1' : 'Player 2';
+          const oppRole = myRole === 'Player 1' ? 'Player 2' : 'Player 1';
           const stakes = paired?.pointsPerRound || {};
-          const myLock = Number(stakes[myRole]) || lockedMatchRef.current || Number(roundPoints) || 0;
-          if (msg.winner === myRole && myLock > 0) {
-            (async () => {
-              try { const j = await adjustPoints(+myLock, 'Gambit War — return match lock'); setPoints(Number(j.sc_balance)||0); } catch {}
-              lockedMatchRef.current = 0;
-            })();
+          const myStake = Number(stakes[myRole]) || lockedStakeRef.current || Number(roundPoints) || 0;
+          const oppStake = Number(stakes[oppRole]) || 0;
+          if (msg.winner === myRole) {
+            (async()=>{ await settleWin(myStake, oppStake); })();
           } else {
-            lockedMatchRef.current = 0;
+            // lost or no winner: clear lock without refund
+            lockedStakeRef.current = 0;
           }
         }
         return;
@@ -243,26 +234,49 @@ export default function GameTable({ embedded = false }) {
         setRound(0);
         setP1Card(null); setP2Card(null); setRoundWinner(null); setWarDepth(0);
         setScores(msg.scores || { 'Player 1':0, 'Player 2':0 });
-        deductedKeysRef.current.clear();
-        paidKeysRef.current.clear();
+        settledOnceRef.current = false;
+        // Lock again for the new match if not already
+        (async()=>{ const s = paired?.pointsPerRound || {}; const myRole = (playerNumber===1?'Player 1':'Player 2'); const myStake = Number(s[myRole] ?? roundPoints) || Number(roundPoints)||0; if (lockedStakeRef.current<=0) await lockStake(myStake); })();
         return;
       }
 
       if (msg.type === 'opponentLeft') {
-        if (!settledOnceRef.current) (async () => { await refundMatch('opponent left'); })();
+        // If match not decided, refund any lock (room canceled)
+        if (!settledOnceRef.current) (async () => { await refundStake('opponent left'); })();
         setQueued(false); setPaired(null); setCountdown(null); setStarted(false);
         setP1Card(null); setP2Card(null); setRoundWinner(null); setWarDepth(0);
-        deductedKeysRef.current.clear();
-        paidKeysRef.current.clear();
+        settledOnceRef.current = false;
         return;
       }
     };
 
-    sock.onclose = () => setWs(null);
-    sock.onerror = () => {};
-  }, [paired, playerNumber, roundPoints, scores, refundMatch, creditForKey, deductForKey]);
+    sock.onclose = () => { setWsConnected(false); setWs(null); };
+    sock.onerror = () => { setWsConnected(false); };
+  }, [paired, playerNumber, roundPoints, scores, refundStake, lockStake, settleWin]);
 
   useEffect(() => { connect(); return () => { try { ws?.close(); } catch {} }; /* eslint-disable-next-line */ }, []);
+
+  // Sync with global Gaming Profile (NavBar)
+  useEffect(()=>{
+    const applyProfile = ()=>{
+      try{
+        const n = localStorage.getItem('username') || '';
+        const a = localStorage.getItem('profileAvatar') || '';
+        if (n) setUsername(n.slice(0,16));
+        if (a) setAvatar(a);
+      }catch{}
+    };
+    if (typeof window !== 'undefined'){
+      window.addEventListener('profile:update', applyProfile);
+      window.addEventListener('storage', applyProfile);
+    }
+    return ()=>{
+      if (typeof window !== 'undefined'){
+        window.removeEventListener('profile:update', applyProfile);
+        window.removeEventListener('storage', applyProfile);
+      }
+    };
+  },[]);
 
   /**********
    * Actions
@@ -275,22 +289,18 @@ export default function GameTable({ embedded = false }) {
       localStorage.setItem('war_avatar', avatar);
       localStorage.setItem('war_stake', String(pts));
     }
-    const ok = await lockMatch(pts); // match-level lock (neutralized in UI)
-    if (!ok) return;
     ws?.send(JSON.stringify({ type:'joinGame', username:name, avatar, stake:pts }));
   };
   const deal = () => { if (canDeal) { setCanDeal(false); ws?.send(JSON.stringify({ type:'deal' })); } };
   const rematch = async () => {
-    const pts = Math.max(0.01, Number(roundPoints)||0);
-    if (lockedMatchRef.current <= 0) { const ok = await lockMatch(pts); if (!ok) return; }
     ws?.send(JSON.stringify({ type:'rematchVote' }));
   };
   const leave = () => {
     ws?.send(JSON.stringify({ type:'leaveGame' }));
-    if (!settledOnceRef.current) (async () => { await refundMatch('left game'); })();
+    if (!settledOnceRef.current) (async () => { await refundStake('left game'); })();
     setQueued(false); setPaired(null); setCountdown(null); setStarted(false);
     setP1Card(null); setP2Card(null); setRoundWinner(null); setWarDepth(0);
-    deductedKeysRef.current.clear(); paidKeysRef.current.clear();
+    settledOnceRef.current = false;
   };
 
   /***********
@@ -338,48 +348,27 @@ export default function GameTable({ embedded = false }) {
       {!embedded && <NavBar />}
       {!embedded && <div className="nav-spacer" />}
 
-      {/* HUD */}
-      <header className="war-hud">
-        <div className="left">
-          <span className="hud-chip"><i className="bi bi-stars" /> Points: <strong>{fmtPTS(points)}</strong></span>
-          {started && <span className="hud-chip"><i className="bi bi-123" /> Round: <strong>{round}</strong></span>}
-        </div>
-        <div className="right">
-          {!started && !queued && (<button className="btn-join" onClick={join}><i className="bi bi-play-fill" /> Join Match</button>)}
-          {started && (<button className="btn-leave" onClick={leave}><i className="bi bi-door-open" /> Leave</button>)}
-        </div>
-      </header>
+      {/* HUD removed per request */}
 
-      {/* Setup */}
+      <main className="app-content">
+      {(!authed || (started && !wsConnected)) && (<LoginOverlay />)}
+      {/* Setup (shared layout) */}
       {!started && !paired && (
-        <div className="setup">
-          <LedFrame color="rgba(0,255,200,0.9)">
-            <div className="setup-card">
-              <h3>War — PvP</h3>
-              <div className="row">
-                <label>Screen name</label>
-                <input value={username} onChange={(e)=>setUsername(e.target.value.slice(0,16))} placeholder="Your name" />
-              </div>
-              <div className="row">
-                <label>Avatar</label>
-                <div className="ava-row">
-                  {AVATARS.map(a => (
-                    <button key={a} className={`ava-btn ${avatar===a?'is-active':''}`} onClick={()=>setAvatar(a)}>{GLYPHS[a]}</button>
-                  ))}
-                </div>
-              </div>
-              <div className="row">
-                <label>Points per round</label>
-                <div className="stake-input">
-                  <span>PTS</span>
-                  <input inputMode="decimal" type="number" min="0.01" step="0.01"
-                    value={roundPoints} onChange={(e)=>setRoundPoints(Math.max(0, Number(e.target.value)||0))} placeholder="1.00" />
-                </div>
-                <small>Each fresh round uses this many points. WAR chains don’t re-use points.</small>
-              </div>
-              <button className="btn-join wide" onClick={join}><i className="bi bi-play-fill" /> Find opponent</button>
-            </div>
-          </LedFrame>
+        <div className="d-flex justify-content-center p-3">
+          <GameSetup
+            title="Game Setup"
+            badge="War — PvP"
+            username={username}
+            setUsername={(v)=>setUsername((v||'').slice(0,16))}
+            stakeText={stakeText}
+            setStakeText={setStakeText}
+            scBalance={points}
+            currencyLabel="PTS"
+            joinLabel="Find opponent"
+            onJoin={join}
+            joinDisabled={!username}
+            // Optional: provide avatar UI later
+          />
         </div>
       )}
 
@@ -396,13 +385,13 @@ export default function GameTable({ embedded = false }) {
                 <div className="match-col">
                   <div className="mm-avatar"><Avatar id={myAvatar} size={72} /></div>
                   <div className="mm-pill"><i className="bi bi-person-badge" /> {myName}</div>
-                  <div className="mm-pill"><i className="bi bi-stars" /> Your round: <strong>{fmtPTS(stakes['Player 1'] ?? roundPoints)}</strong></div>
+                  <div className="mm-pill"><i className="bi bi-stars" /> Your stake: <strong>{fmtPTS(stakes['Player 1'] ?? roundPoints)}</strong></div>
                 </div>
                 <div className="match-divider">VS</div>
                 <div className="match-col">
                   <div className="mm-avatar"><Avatar id={oppAvatar} size={72} /></div>
                   <div className="mm-pill"><i className="bi bi-person-badge" /> {paired ? oppName : 'Searching…'}</div>
-                  <div className="mm-pill"><i className="bi bi-stars" /> Opponent round: <strong>{fmtPTS(stakes['Player 2'])}</strong></div>
+                  <div className="mm-pill"><i className="bi bi-stars" /> Opponent stake: <strong>{fmtPTS(stakes['Player 2'])}</strong></div>
                 </div>
               </div>
               <div className="mm-footer">
@@ -416,7 +405,7 @@ export default function GameTable({ embedded = false }) {
 
       {/* Table */}
       {started && (
-        <main className="table-wrap">
+        <div className="table-wrap" style={{ position:'relative' }}>
           <div className="player-row">
             <Avatar id={myAvatar} /> <strong>{myName}</strong>
             <span className="score">Score: {scores['Player 1']}</span>
@@ -474,8 +463,17 @@ export default function GameTable({ embedded = false }) {
             <span className="score">Score: {scores['Player 2']}</span>
             <span className="stake"><i className="bi bi-stars" /> {fmtPTS(stakes['Player 2'])}</span>
           </div>
-        </main>
+
+          <QuickChat
+            onSend={(text)=>{ const t=String(text||'').slice(0,80); if(ws && ws.readyState===WebSocket.OPEN){ try{ ws.send(JSON.stringify({ type:'quickChat', text: t })); }catch{} } }}
+            messages={chatFeed}
+            youKey="you"
+            align="right"
+            canSend={wsConnected && started}
+          />
+        </div>
       )}
+      </main>
 
       {/* LED + full-bleed glue (kept separate so it overrides external CSS safely) */}
       <style jsx>{`
@@ -504,44 +502,39 @@ export default function GameTable({ embedded = false }) {
         }
 
         /* Compatibility: reuse global LED variables if present (no duplicate animation) */
-        .led-full .led-run { --led-speed: var(--led-speed, 5s); --led-color: var(--led-color, rgba(255,110,220,0.95)); }
+  .led-full .led-run { --led-speed: var(--global-led-speed); --led-color: var(--led-color, rgba(255,110,220,0.95)); }
       `}</style>
 
       {/* Minimal arcade CSS (scoped) — preserves your layout */}
       <style jsx>{`
-        .gambit-war-page { min-height: 100vh; padding: 0 16px 16px; color: #fff; background: radial-gradient(60% 60% at 50% 10%, #2b1340 0%, #0a0613 60%, #000 100%); }
+  .gambit-war-page { min-height: 100vh; padding: 0 16px 16px; color: var(--text); background: var(--bg-body); }
         .nav-spacer{ height:56px; }
         .war-hud { display:flex; justify-content:space-between; align-items:center; gap:12px; position:sticky; top:0; z-index:10; padding:10px 12px; background:rgba(0,0,0,.35); backdrop-filter: blur(8px); border-radius:14px; border:1px solid rgba(255,255,255,.1); }
         .hud-chip { display:inline-flex; align-items:center; gap:8px; padding:6px 10px; border-radius:999px; background:rgba(255,255,255,.06); border:1px solid rgba(255,255,255,.1); }
-        .btn-join, .btn-leave, .btn-deal, .btn-rematch { appearance:none; border:0; cursor:pointer; font-weight:700; padding:10px 16px; border-radius:999px; color:#0b0713; box-shadow:0 10px 30px rgba(255,215,0,.25); }
-        .btn-join{ background:linear-gradient(90deg,#ffd400,#ff7a00); }
-        .btn-deal{ background:linear-gradient(90deg,#00ffd0,#5bff6d); }
-        .btn-rematch{ background:linear-gradient(90deg,#88a8ff,#e28bff); }
-        .btn-leave{ background:linear-gradient(90deg,#ff6b6b,#ffdcdc); }
-        .btn-leave.subtle{ background:rgba(255,255,255,.12); color:#fff; box-shadow:none; }
+  /* button gradients now provided globally; keep only width helper */
 
         .setup{ display:flex; justify-content:center; padding:20px; }
-        .setup-card{ position:relative; z-index:1; width:min(720px,100%); background:rgba(255,255,255,.06); border:1px solid rgba(255,255,255,.1); border-radius:20px; padding:18px; box-shadow:0 20px 50px rgba(0,0,0,.35); }
+  .setup-card{ position:relative; z-index:1; width:min(720px,100%); background: var(--card-bg); border:1px solid var(--card-border); border-radius:20px; padding:18px; box-shadow:0 20px 50px rgba(0,0,0,.35); }
         .setup-card h3{ margin:0 0 12px; }
         .row{ display:grid; gap:8px; margin:10px 0; }
         .ava-row{ display:flex; flex-wrap:wrap; gap:8px; }
-        .ava-btn{ font-size:20px; padding:8px 10px; border-radius:12px; background:rgba(255,255,255,.08); border:1px solid rgba(255,255,255,.14); }
+  .ava-btn{ font-size:20px; padding:8px 10px; border-radius:12px; background:rgba(255,255,255,.08); border:1px solid var(--divider); color: var(--text); }
         .ava-btn.is-active{ outline:2px solid #ffd857; }
-        .stake-input{ display:flex; align-items:center; gap:8px; background:rgba(255,255,255,.08); border:1px solid rgba(255,255,255,.14); padding:8px 10px; border-radius:12px; }
-        .stake-input input{ background:transparent; border:0; color:#fff; width:120px; outline:none; }
+  .stake-input{ display:flex; align-items:center; gap:8px; background: var(--input-bg); border:1px solid var(--input-border); padding:8px 10px; border-radius:12px; }
+  .stake-input input{ background:transparent; border:0; color: var(--input-text); width:120px; outline:none; }
         .btn-join.wide{ width:100%; margin-top:8px; }
 
         .match-overlay{ display:flex; justify-content:center; padding:20px; }
-        .match-card{ position:relative; z-index:1; width:min(900px,100%); background:rgba(255,255,255,.06); border:1px solid rgba(255,255,255,.1); border-radius:20px; padding:18px; box-shadow:0 20px 50px rgba(0,0,0,.35); }
+  .match-card{ position:relative; z-index:1; width:min(900px,100%); background: var(--card-bg); border:1px solid var(--card-border); border-radius:20px; padding:18px; box-shadow:0 20px 50px rgba(0,0,0,.35); }
         .match-header{ display:flex; justify-content:space-between; align-items:center; margin-bottom:10px; }
         .match-body{ display:grid; grid-template-columns:1fr auto 1fr; gap:12px; align-items:center; }
-        .match-divider{ font-weight:800; font-size:18px; padding:6px 10px; border-radius:999px; background:rgba(255,255,255,.1); }
+  .match-divider{ font-weight:800; font-size:18px; padding:6px 10px; border-radius:999px; background:rgba(255,255,255,.1); color: var(--text); }
         .mm-avatar{ display:grid; place-items:center; }
-        .mm-pill{ display:inline-flex; align-items:center; gap:8px; padding:6px 10px; border-radius:999px; background:rgba(255,255,255,.08); border:1px solid rgba(255,255,255,.14); }
-        .mm-cancel{ appearance:none; border:0; background:rgba(255,255,255,.08); color:#fff; border-radius:10px; padding:6px 10px; cursor:pointer; }
+  .mm-pill{ display:inline-flex; align-items:center; gap:8px; padding:6px 10px; border-radius:999px; background:rgba(255,255,255,.08); border:1px solid var(--divider); color: var(--text); }
+  .mm-cancel{ appearance:none; border:0; background:rgba(255,255,255,.08); color: var(--text); border-radius:10px; padding:6px 10px; cursor:pointer; }
 
         .table-wrap{ display:grid; gap:14px; padding:16px; overflow:visible; }
-        .player-row{ display:flex; align-items:center; gap:10px; justify-content:space-between; background:rgba(255,255,255,.06); border:1px solid rgba(255,255,255,.1); border-radius:14px; padding:10px 12px; }
+  .player-row{ display:flex; align-items:center; gap:10px; justify-content:space-between; background: var(--card-bg); border:1px solid var(--card-border); border-radius:14px; padding:10px 12px; color: var(--text); }
         .player-row .score, .player-row .stake{ opacity:.9; }
 
         /* Normal centered container for mobile/embeds; full-bleed on desktop is handled above */

@@ -1,7 +1,7 @@
 /* =============== Minimal layout + your existing board look =============== */
 
 /* Base */
-html, body, #root { background: #0b1220; color: #e5e7eb; -webkit-tap-highlight-color: transparent; }
+html, body, #root { background: var(--bg-body); color: var(--text); -webkit-tap-highlight-color: transparent; }
 
 /* When GameBoard is standalone (NOT embedded) it renders its own NavBar and uses this spacer.
    ConnectFourScreen embeds the board and hides these via .cf-embed below. */
@@ -9,6 +9,8 @@ html, body, #root { background: #0b1220; color: #e5e7eb; -webkit-tap-highlight-c
 
 /* Page container: allow scrolling so bottom of board is reachable */
 .cf-page { min-height: 100dvh; display: flex; flex-direction: column; overflow-y: auto; -webkit-overflow-scrolling: touch; }
+/* When embedded inside the ConnectFourScreen, do not force full viewport height */
+.cf-embed.cf-page { min-height: unset; overflow: hidden; }
 .cf-page .container { max-width: min(920px, 100%); }
 
 /* In embedded mode (inside ConnectFourScreen) hide inner hero + spacer and remove any extra top gap */
@@ -38,7 +40,7 @@ html, body, #root { background: #0b1220; color: #e5e7eb; -webkit-tap-highlight-c
   color: #fff;
   overflow: hidden;
   box-shadow: 0 .75rem 1.5rem rgba(0,0,0,.18);
-  background: linear-gradient(120deg, #6d28d9, #2563eb, #06b6d4);
+  background: linear-gradient(180deg, #171717, #0f0f0f);
   background-size: 200% 200%;
   animation: cfShift 14s ease infinite;
   margin-bottom: .6rem;
@@ -49,11 +51,11 @@ html, body, #root { background: #0b1220; color: #e5e7eb; -webkit-tap-highlight-c
   100% { background-position: 0% 50%; }
 }
 .badge-row { display: flex; flex-wrap: wrap; gap: .4rem; width: 100%; }
-.badge-chip { display:inline-flex; align-items:center; gap:.4rem; padding:.28rem .55rem; border-radius:999px; background: rgba(255,255,255,.18); color:#fff; font-weight:700; line-height:1; font-size:.9rem; }
+.badge-chip { display:inline-flex; align-items:center; gap:.4rem; padding:.28rem .55rem; border-radius:999px; background: rgba(255,255,255,.18); color: var(--text); font-weight:700; line-height:1; font-size:.9rem; }
 
 /* Board shell */
 .board-outer { width: 100%; }
-.board-wrap { width: 100%; max-width: min(720px, 100vw - 16px); margin-inline: auto; box-sizing: border-box; padding-top: 6px; }
+.board-wrap { width: 100%; max-width: min(920px, 100vw - 16px); margin-inline: auto; box-sizing: border-box; padding-top: 0; }
 .cf-stage { perspective: 1000px; perspective-origin: 50% 20%; }
 .board-frame { position: relative; transform: translateZ(0) rotateX(4deg) translateY(2px); transform-style: preserve-3d; }
 .board-skin {
@@ -68,14 +70,28 @@ html, body, #root { background: #0b1220; color: #e5e7eb; -webkit-tap-highlight-c
   box-shadow: inset 0 8px 20px rgba(0,0,0,.35), 0 18px 34px rgba(0,0,0,.42), 0 2px 0 var(--board-edge-top);
   z-index: 0;
 }
+
+/* Dark theme: use original black board with a soft glow (no blue) */
+:root:not([data-theme="day"]) .board-skin {
+  background:
+    radial-gradient(120% 60% at 50% -10%, rgba(255,255,255,0.06), transparent 55%),
+    linear-gradient(180deg, rgba(255,255,255,0.04), rgba(0,0,0,0.08)),
+    linear-gradient(180deg, #151515, #000);
+  box-shadow:
+    inset 0 16px 40px rgba(0,0,0,.55),
+    inset 0 -12px 36px rgba(0,0,0,.45),
+    inset 0 0 42px rgba(255,255,255,0.05),
+    0 18px 34px rgba(0,0,0,.42),
+    0 2px 0 var(--board-edge-top);
+}
 .board-glint { position:absolute; inset:0; pointer-events:none; border-radius:14px; background:
   radial-gradient(120% 60% at 50% -10%, rgba(255,255,255,.14), transparent 55%),
   radial-gradient(60% 30% at 20% 0%, rgba(255,255,255,.07), transparent 60%),
   radial-gradient(60% 30% at 80% 0%, rgba(255,255,255,.07), transparent 60%); z-index: 0; }
 
 /* Grid */
-.board { width: 100%; display: grid; grid-template-columns: repeat(7, minmax(36px, 1fr)); column-gap: var(--col-gap); justify-content: center; position: relative; z-index: 2; }
-.column-hover { display: grid; grid-auto-rows: minmax(36px, 1fr); row-gap: var(--row-gap); }
+.board { width: 100%; display: grid; grid-template-columns: repeat(7, minmax(48px, 1fr)); column-gap: var(--col-gap); justify-content: center; position: relative; z-index: 2; }
+.column-hover { display: grid; grid-auto-rows: minmax(48px, 1fr); row-gap: var(--row-gap); }
 
 .cell { position: relative; width: 100%; aspect-ratio: 1; border-radius: 50%; display: grid; place-items: center; cursor: pointer; background: transparent; z-index: 2; }
 .cell::before{
@@ -118,7 +134,7 @@ html, body, #root { background: #0b1220; color: #e5e7eb; -webkit-tap-highlight-c
 
 /* Overlays / badges / buttons (short set) */
 .winlose-overlay{ position:absolute; inset:0; z-index:3; display:flex; align-items:center; justify-content:center; padding:1rem; background: rgba(10,12,16,.45); backdrop-filter: blur(2px); -webkit-backdrop-filter: blur(2px); }
-.winlose-card{ background:#ffffff; color:#0f172a; border-radius:1rem; box-shadow: 0 1.25rem 2.5rem rgba(0,0,0,.28); padding:1rem 1.2rem; max-width:92%; text-align:center; }
+.winlose-card{ background: var(--card-bg); color: var(--text); border:1px solid var(--card-border); border-radius:1rem; box-shadow: 0 1.25rem 2.5rem rgba(0,0,0,.28); padding:1rem 1.2rem; max-width:92%; text-align:center; }
 .winlose-title{ font-weight:800; letter-spacing:.25px; font-size:clamp(1rem,5.2vw,1.5rem); margin:0; display:inline-flex; align-items:center; gap:.5rem; }
 .win-glow{ position:absolute; inset:0; z-index:-1; border-radius:inherit; background: radial-gradient(ellipse at center, rgba(34,197,94,.35), transparent 65%); }
 .wins-wrap { display:flex; flex-wrap:wrap; gap:.5rem; justify-content:center; }
@@ -126,10 +142,10 @@ html, body, #root { background: #0b1220; color: #e5e7eb; -webkit-tap-highlight-c
 .btn-resp { font-weight:700; line-height:1.1; padding:.5rem .75rem; font-size:.9rem; border-radius:.75rem; }
 
 /* Mute */
-.mute-btn { display:inline-flex; align-items:center; gap:.4rem; background: rgba(255,255,255,.18); border: 0; color: #fff; padding: .35rem .6rem; border-radius: .6rem; cursor: pointer; }
+.mute-btn { display:inline-flex; align-items:center; gap:.4rem; background: rgba(255,255,255,.18); border: 0; color: var(--text); padding: .35rem .6rem; border-radius: .6rem; cursor: pointer; }
 
 /* Turn toast */
-.turn-toast { position:absolute; top:-12px; left:50%; transform:translateX(-50%); background: rgba(17,24,39,.92); color:#fff; padding:.3rem .5rem; border-radius:.5rem; font-weight:700; font-size:.8rem; line-height:1; box-shadow:0 6px 18px rgba(0,0,0,.25); pointer-events:none; }
+.turn-toast { position:absolute; top:-12px; left:50%; transform:translateX(-50%); background: rgba(17,24,39,.92); color: var(--text); padding:.3rem .5rem; border-radius:.5rem; font-weight:700; font-size:.8rem; line-height:1; box-shadow:0 6px 18px rgba(0,0,0,.25); pointer-events:none; }
 
 /* ================= Matchmaking modal — responsive fixes ================= */
 .match-overlay {
@@ -148,9 +164,9 @@ html, body, #root { background: #0b1220; color: #e5e7eb; -webkit-tap-highlight-c
 .match-card {
   width: 100%;
   max-width: 860px;        /* desktop cap */
-  background:#0f172a;
-  border:1px solid rgba(255,255,255,.08);
-  color:#e5e7eb;
+  background: var(--card-bg);
+  border:1px solid var(--card-border);
+  color: var(--text);
   border-radius:16px;
   box-shadow:0 1.25rem 2.5rem rgba(0,0,0,.35);
   overflow:hidden;
@@ -158,7 +174,7 @@ html, body, #root { background: #0b1220; color: #e5e7eb; -webkit-tap-highlight-c
 .match-header {
   display:flex; align-items:center; justify-content:space-between; gap:.75rem;
   padding:.8rem 1rem;
-  background: linear-gradient(120deg, #6d28d9, #2563eb, #06b6d4);
+  background: linear-gradient(180deg, #171717, #0f0f0f);
   color:#fff;
 }
 .match-body {
@@ -235,13 +251,21 @@ html, body, #root { background: #0b1220; color: #e5e7eb; -webkit-tap-highlight-c
 .avatar-hero { width: clamp(72px, 10vw, 96px); height: clamp(72px, 10vw, 96px); border-radius: 999px; display: grid; place-items:center; background: #0b1220; border: 3px solid rgba(255,255,255,.45); box-shadow: 0 8px 18px rgba(0,0,0,.35), inset 0 2px 0 rgba(255,255,255,.06); font-size: clamp(38px, 6.8vw, 54px); line-height: 1; }
 
 /* Wooden stand (kept) */
-.board-stand { position: relative; width: 94%; height: 28px; margin: -2px auto 0; border-radius: 12px; background: linear-gradient(180deg, #b47a3c, #8b5a2b); box-shadow: inset 0 2px 0 rgba(255,255,255,.18), inset 0 -8px 12px rgba(0,0,0,.35), 0 12px 28px rgba(0,0,0,.45); }
+.board-stand { position: relative; width: 94%; height: 28px; margin: -2px auto 0; border-radius: 12px; background: linear-gradient(180deg, #b47a3c, #8b5a2b); box-shadow: inset 0 2px 0 rgba(255,255,255,.18), inset 0 -8px 12px rgba(0,0,0,.35), 0 12px 28px rgba(0,0,0,.45); display:none; }
 .board-stand::before, .board-stand::after { content:""; position:absolute; bottom:-12px; width:26%; height:16px; border-radius:10px; background: linear-gradient(180deg, #8b5a2b, #5a3b1f); box-shadow: inset 0 2px 0 rgba(255,255,255,.1), inset 0 -6px 10px rgba(0,0,0,.35), 0 10px 20px rgba(0,0,0,.35); }
 .board-stand::before { left:6%; transform: skewX(-10deg); } .board-stand::after { right:6%; transform: skewX(10deg); }
 
 /* Mobile tweaks */
 @media (max-width: 600px) {
   .board-wrap  { max-width: 100vw !important; padding-left: 0 !important; padding-right: 0 !important; }
-  .board       { column-gap: 8px !important; }
-  .board-frame { transform-origin: top center !important; transform: translateZ(0) scale(.96) rotateX(4deg) translateY(2px) !important; }
+  /* Make board smaller on phones: tighter gaps and smaller min cell size */
+  .board       { column-gap: 6px !important; grid-template-columns: repeat(7, minmax(40px, 1fr)); }
+  .column-hover{ row-gap: 6px !important; grid-auto-rows: minmax(40px, 1fr); }
+  .board-frame { transform-origin: top center !important; transform: translateZ(0) scale(.92) rotateX(4deg) translateY(2px) !important; }
+}
+
+/* Desktop up: subtly scale up the board for larger screens */
+@media (min-width: 992px) {
+  /* Slightly larger desktop scale (~22%) */
+  .board-frame { transform: translateZ(0) scale(1.22) rotateX(4deg) translateY(2px); }
 }
