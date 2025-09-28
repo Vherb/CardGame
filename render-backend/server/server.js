@@ -11,6 +11,9 @@ const cors = require("cors");
 const jwt = require("jsonwebtoken");
 const { generateToken } = require("./jwt");
 const JWT_SECRET = process.env.JWT_SECRET || "1234";
+if (JWT_SECRET === '1234') {
+  console.warn("[SECURITY] JWT_SECRET is using the default '1234'. Set JWT_SECRET in your env.");
+}
 
 let _fetch = global.fetch;
 if (typeof _fetch !== "function") {
@@ -164,6 +167,8 @@ function maxSpendableRounded(asset, bal) {
 }
 
 /* -------------------- DB -------------------- */
+const DB_OPTIONAL = /^(1|true)$/i.test(String(process.env.DB_OPTIONAL || ''));
+let dbReady = false;
 const db = mysql.createPool({
   host: process.env.MYSQL_HOST || "127.0.0.1",
   user: process.env.MYSQL_USER || "root",
@@ -172,20 +177,62 @@ const db = mysql.createPool({
   port: Number(process.env.MYSQL_PORT) || 3306,
   connectionLimit: 10,
 });
+// DB health endpoint available whether or not DB is ready
+app.get('/health/db', (_req, res) => {
+  if (!dbReady) return res.status(503).json({ ok: false, error: 'database unavailable' });
+  db.query('SELECT 1 AS ok', (err, rows) => {
+    if (err) return res.status(500).json({ ok: false, error: String(err.message||err) });
+    res.json({ ok: true, row: rows && rows[0] ? rows[0] : null });
+  });
+});
+
 db.getConnection((err, conn) => {
   if (err) {
     console.error("DB connect failed:", err);
+    if (DB_OPTIONAL) {
+      console.warn("[DB_OPTIONAL] Continuing without database. Endpoints needing DB will fail.");
+      return; // do not run migrations
+    }
     return;
   }
+  dbReady = true;
   console.log("Connected to the database");
   conn.release();
-  // DB health check
-  app.get('/health/db', (_req, res) => {
-    db.query('SELECT 1 AS ok', (err, rows) => {
-      if (err) return res.status(500).json({ ok: false, error: String(err.message||err) });
-      res.json({ ok: true, row: rows && rows[0] ? rows[0] : null });
+
+  const safeQuery = (sql, params, cb) => {
+    const q = db.query(sql, params || ((typeof params === 'function') ? undefined : params), (err, r) => {
+      if (typeof params === 'function' && !cb) params(err, r);
+      else if (cb) cb(err, r);
     });
-  });
+    if (q && typeof q.on === 'function') q.on('error', () => {});
+  };
+
+  safeQuery(
+    "CREATE TABLE IF NOT EXISTS jackpot_sc (id INT PRIMARY KEY, pool_sc DECIMAL(32,8) NOT NULL DEFAULT 0)",
+    () => safeQuery("INSERT IGNORE INTO jackpot_sc (id, pool_sc) VALUES (1, 0)")
+  );
+  safeQuery(
+    "ALTER TABLE users ADD COLUMN IF NOT EXISTS xlm_balance DECIMAL(32,8) NOT NULL DEFAULT 0",
+    (e) => {
+      if (e && !/Duplicate column/i.test(String(e && e.message)))
+        console.warn("ALTER users add xlm_balance failed:", e && e.message);
+    }
+  );
+  safeQuery(
+    "ALTER TABLE users ADD COLUMN IF NOT EXISTS sc_balance DECIMAL(32,8) NOT NULL DEFAULT 0",
+    (e) => {
+      if (e && !/Duplicate column/i.test(String(e && e.message)))
+        console.warn("ALTER users add sc_balance failed:", e && e.message);
+      else
+        safeQuery(
+          "UPDATE users SET sc_balance = coin_balance WHERE (sc_balance = 0 OR sc_balance IS NULL) AND coin_balance IS NOT NULL"
+        );
+    }
+  );
+  safeQuery(
+    "CREATE TABLE IF NOT EXISTS app_config (k VARCHAR(64) PRIMARY KEY, v TEXT NOT NULL)",
+    (e) => { if (e) console.warn("CREATE app_config failed:", e && e.message); }
+  );
 });
 
 db.query(
@@ -239,6 +286,7 @@ app.post("/registration", async (req, res) => {
     const { email, username, password } = req.body || {};
     if (!email || !username || !password)
       return res.status(400).json({ message: "Missing fields" });
+    if (!dbReady) return res.status(503).json({ message: "Database unavailable" });
     db.query(
       "SELECT id FROM users WHERE username = ? LIMIT 1",
       [username],
@@ -274,6 +322,7 @@ app.post("/login", async (req, res) => {
   const { username, password } = req.body || {};
   if (!username || !password)
     return res.status(400).json({ message: "Missing fields" });
+  if (!dbReady) return res.status(503).json({ message: "Database unavailable" });
   db.query(
     "SELECT * FROM users WHERE username = ? LIMIT 1",
     [username],
