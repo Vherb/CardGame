@@ -4,7 +4,8 @@ const http = require('http');
 const express = require('express');
 const WebSocket = require('ws');
 const cors = require('cors');
-const { WarGame } = require('./WarGame'); // new class below
+// Use the pure server-side engine (no JSX)
+const { WarGame } = require('./WarEngine');
 
 /* ---------- Server ---------- */
 const PORT = process.env.PORT || 3001;
@@ -135,6 +136,20 @@ wss.on('connection', (ws) => {
     try { data = JSON.parse(raw.toString()); } catch { return; }
 
     switch (data.type) {
+      case 'quickChat': {
+        const id = ws.__roomId; const room = id && rooms.get(id);
+        if (!room) break;
+        // Ignore chat until game actually starts (countdown complete)
+        if (room.countdownValue != null) break;
+        ws.__lastChatTs = ws.__lastChatTs || 0; const now = Date.now();
+        if (now - ws.__lastChatTs < 700) break; ws.__lastChatTs = now;
+        const side = ws.__role || 'Player';
+        const name = (room.meta && room.meta.usernames && room.meta.usernames[side]) || side;
+        const textRaw = (data.text || '').toString();
+        const text = textRaw.slice(0, 80);
+        broadcast(room.players, { type: 'quickChat', from: side, username: name, text, ts: now });
+        break;
+      }
       case 'joinGame': {
         // meta sent from client
         const username = (data.username || '').toString().slice(0, 40);

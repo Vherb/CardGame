@@ -5,9 +5,19 @@
 
 /* Keep a tiny contrast boost vs plain bootstrap */
 .app-navbar {
-  background: linear-gradient(180deg, #0b1220, #0b1220) !important;
-  border-bottom: 1px solid rgba(255,255,255,.08);
+  background: linear-gradient(180deg, var(--nav-bg), var(--nav-bg)) !important;
+  border-bottom: 1px solid var(--nav-border);
+  z-index: 12000; /* above login overlay (11000) */
 }
+
+/* Ensure dropdown menus appear above overlays and are legible */
+.dropdown-menu { z-index: 12500; backdrop-filter: none !important; -webkit-backdrop-filter: none !important; }
+.dropdown-menu .dropdown-item { color: #ffffff !important; }
+.dropdown-menu .dropdown-item:hover, .dropdown-menu .dropdown-item:focus { color: #ffffff !important; background: rgba(255,255,255,.1); }
+
+/* Ensure Bootstrap modals appear above the fixed theme footer */
+.modal { z-index: 9000 !important; }
+.modal-backdrop { z-index: 8990 !important; }
 
 .app-navbar .navbar-toggler {
   border: 1px solid rgba(255,255,255,.25);
@@ -25,6 +35,7 @@
   font-size: 1.15rem;
   line-height: 1;
 }
+.brand-mark { filter: drop-shadow(0 0 6px rgba(255,110,220,0.5)); }
 .brand-name {
   font-size: 1rem;
 }
@@ -64,6 +75,19 @@
 .login-btn:hover {
   filter: brightness(1.05);
 }
+
+/* Bottom LED rail attached to NavBar (matches theme footer aesthetic) */
+.nav-led-rail { position: absolute; left: 0; right: 0; bottom: -2px; height: 8px; overflow: visible; }
+.nav-led-run {
+  position:absolute; inset:0;
+  --led-color: var(--led-color);
+  --led-speed: var(--global-led-speed);
+  background: linear-gradient(90deg, transparent, var(--led-color), transparent);
+  background-size: 200% 100%;
+  animation: navLedScroll var(--led-speed) linear infinite;
+  filter: drop-shadow(0 0 6px var(--led-color));
+}
+@keyframes navLedScroll { 0% { background-position: 0% 0; } 100% { background-position: 200% 0; } }
 
 /* Optional: ensure page content starts below navbar if you want to use it here
    (most of your screens already add a spacer or padding using --nav-h) */

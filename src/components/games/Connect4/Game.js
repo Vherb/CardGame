@@ -43,7 +43,7 @@ import chip1000 from "./chips/1000.png";
 const CHIP_SRC = { 1: chip1, 5: chip5, 10: chip10, 25: chip25, 50: chip50, 100: chip100, 250: chip250, 500: chip500, 1000: chip1000 };
 const API =
   process.env.REACT_APP_API_BASE ||
-  `http://${window.location.hostname}:3002`;
+  `http://${window.location.hostname}:3014`;
 
 const NETWORK_PASSPHRASE = Networks.TESTNET;
 const isPhone = window.matchMedia("(max-width: 575.98px)").matches;

@@ -1,0 +1,25 @@
+/* Shared login overlay matching Roll of Cards */
+.login-overlay {
+  position: absolute; /* cover app-content only; keep navbar sharp */
+  inset: 0;
+  background: rgba(10,12,16,0.55);
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 11000; /* above match/avatars (1050/1060) */
+}
+.login-overlay .overlay-card {
+  background: #0f172a;
+  color: #fff;
+  padding: 18px 22px;
+  border-radius: 10px;
+  box-shadow: 0 10px 25px rgba(0,0,0,.35);
+}
+
+/* Optional higher placement (slightly above center) */
+.login-overlay.login-overlay--high {
+  align-items: flex-start;
+  padding-top: 8vh;
+}

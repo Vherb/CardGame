@@ -5,7 +5,7 @@ import ThreeDiceCanvas from "./ThreeDiceCanvas";
 import "./../../App.css";
 import "./Game.css";
 import "bootstrap/dist/css/bootstrap.min.css";
-import CardDealTwo_Meuk from "./CardDealTwo_Meuk";
+import CardDealTwoMeuk from "./CardDealTwo_Meuk";
 
 import {
   Container,
@@ -25,7 +25,7 @@ import CancelRoundedIcon from "@mui/icons-material/CancelRounded";
 import EmojiEventsRoundedIcon from "@mui/icons-material/EmojiEventsRounded";
 import InfoRoundedIcon from "@mui/icons-material/InfoRounded";
 
-import { Keypair, Networks } from "@stellar/stellar-base";
+import { Keypair } from "@stellar/stellar-base";
 import { ethers } from "ethers";
 import * as xrpl from "xrpl";
 
@@ -45,7 +45,6 @@ const API =
   process.env.REACT_APP_API_BASE ||
   `http://${window.location.hostname}:3002`;
 
-const NETWORK_PASSPHRASE = Networks.TESTNET;
 const isPhone = window.matchMedia("(max-width: 575.98px)").matches;
 
 // UI timings
@@ -56,15 +55,18 @@ const AUTO_ROLL_DELAY_MS = CARD_FIRST_DELAY_MS + CARD_STAGGER_MS + CARD_TOTAL_MS
 
 // ====== HOUSE-FAVOR NUMBERS ======
 // Main bet jackpots (profit multipliers) — apply to SC winnings (reduced)
-const JACKPOT_EXACT_PROFIT = 3.0;             // was 5.0
-const JACKPOT_ACE_SNAKE_PROFIT = 2.0;         // was 3.0
+const JACKPOT_EXACT_PROFIT = 2.0;             // was 5.0
+const JACKPOT_ACE_SNAKE_PROFIT = 5.0;         // was 3.0
 const JACKPOT_DOUBLE_ACE_SNAKE_PROFIT = 10.0; // was 25.0
 
 // Side bet config — SC jackpot tickets only
 const SIDE_STAKE_SC = 1.0;
 
 // House edge on profits (applied to PROFIT only, never to stake returns)
-const HOUSE_EDGE = 0.94; // was 0.985 (~6% rake on profit only)
+const HOUSE_EDGE = 0.99; // ~1% rake on profit only (tuned ~8% edge)
+
+// Base component added to (streak - 1) for BETWEEN wins (tuned ~8% edge)
+const BETWEEN_BASE = 0.16;
 
 // Helpers
 function authFetch(path, options = {}) {
@@ -87,36 +89,31 @@ const clamp = (n, lo, hi) => Math.max(lo, Math.min(hi, n));
 function spreadBonus(lo, hi) {
   const w = Math.max(0, hi - lo - 1);     // numbers strictly between
   const tight = 1 - (w / 9);               // 0..1
-  return clamp(1 + 0.30 * tight, 1, 1.30); // was up to 1.75
+  return clamp(1 + 0.30 * tight, 1, 1.45); // cap at 1.45
 }
 
-/* === THEME HELPERS (LED visuals used by War/Connect4 pages) === */
-function LedBar({ color = 'rgba(255,110,220,0.95)', speed = 3 }) {
-  return (
-    <div className="led-topbar" aria-hidden="true">
-      <div className="led-run" style={{ ['--led-color']: color, ['--led-speed']: `${speed}s` }} />
-    </div>
-  );
-}
-function LedFrame({ children, color = 'rgba(255,110,220,0.9)', speed = 2, rounded = '1rem', thickness = 3, className = '' }) {
-  return (
-    <div className={`relative ${className}`}>
-      <div className="absolute inset-0 pointer-events-none" style={{
-        borderRadius: rounded,
-        boxShadow: `0 0 24px ${color}, inset 0 0 12px ${color}`,
-        animation: `gflash ${speed}s linear infinite`,
-        border: `${thickness}px solid transparent`,
-        background: `linear-gradient(90deg, ${color} 0%, transparent 40%, transparent 60%, ${color} 100%)`,
-        WebkitMask: 'linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0)',
-        WebkitMaskComposite: 'xor', maskComposite: 'exclude', padding: 2
-      }} />
-      <div className="relative">{children}</div>
-    </div>
-  );
-}
+/* Removed unused LedBar/LedFrame helpers */
 
 // =====================================================
 export default function Game() {
+  // When on phone, disable global bottom padding so content can be flush with bottom nav/footer
+  useEffect(() => {
+    if (!isPhone) return;
+    try {
+      document.documentElement.classList.add('no-bottom-pad');
+      document.body.classList.add('no-bottom-pad');
+      const root = document.getElementById('root');
+      if (root) root.classList.add('no-bottom-pad');
+    } catch {}
+    return () => {
+      try {
+        document.documentElement.classList.remove('no-bottom-pad');
+        document.body.classList.remove('no-bottom-pad');
+        const root = document.getElementById('root');
+        if (root) root.classList.remove('no-bottom-pad');
+      } catch {}
+    };
+  }, []);
   // ----- Cards -----
   const cardValues = useMemo(() => ([
     { label: "Ace", suit: "Spades", unicode: "🂡", color: "black" },
@@ -189,10 +186,16 @@ export default function Game() {
   const [placedChips, setPlacedChips] = useState([]);
   const nextChipId = useRef(1);
 
+  // --- track last bet/stack for "Rebet"
+  const lastBetRef = useRef(0);
+  const [lastBetAmt, setLastBetAmt] = useState(0);
+  const lastPlacedChipsRef = useRef([]);
+  // persist side-bet choices too so Rebet restores them
+  const lastSideColorRef = useRef(false);
+  const lastSideDiceRef = useRef(false);
+
   const [cardValue1, setCardValue1] = useState("");
   const [cardValue2, setCardValue2] = useState("");
-  const [diceValue1, setDiceValue1] = useState(0);
-  const [diceValue2, setDiceValue2] = useState(0);
 
   const frozenARef = useRef(null);
   const frozenBRef = useRef(null);
@@ -217,29 +220,26 @@ export default function Game() {
   useEffect(() => { secretKeyRef.current = secretKey; }, [secretKey]);
   useEffect(() => { publicKeyRef.current = publicKey; }, [publicKey]);
 
-  const [uiStake, setUiStake] = useState(0);
-  const [uiSideStake, setUiSideStake] = useState(0);
-
-  const sideActiveRef = useRef({ color: false, dice: false });
-  const waitingSideTxRef = useRef(false);
-
   const [bet, setBet] = useState(0);
   const [roundResult, setRoundResult] = useState("");
+  // Rebet animation state
+  const [isRebetting, setIsRebetting] = useState(false);
+  const rebetTimersRef = useRef([]);
 
   // ====== STREAK (house-favor) ======
-  const [payoutMultiplier, setPayoutMultiplier] = useState(1.05);
-  const payoutMultiplierRef = useRef(1.05);
+  const [payoutMultiplier, setPayoutMultiplier] = useState(1.16);
+  const payoutMultiplierRef = useRef(1.16);
   useEffect(() => { payoutMultiplierRef.current = payoutMultiplier; }, [payoutMultiplier]);
 
-  const MULTIPLIER_MIN = 1.05;
-  const MULTIPLIER_MAX = 2.0;
+  const MULTIPLIER_MIN = 1.16; // tuned floor
+  const MULTIPLIER_MAX = 100.0;
   const clamp1 = (n) => clamp(Number(n.toFixed(2)), MULTIPLIER_MIN, MULTIPLIER_MAX);
-  const bumpOnNormalWin = () => setPayoutMultiplier((m) => clamp1(m + 0.10));
+  const bumpOnNormalWin = () => setPayoutMultiplier((m) => clamp1(m + 0.12));
   const bumpOnJackpotWin = () => setPayoutMultiplier((m) => clamp1(m + 0.50));
-  const resetOnLoss      = () => setPayoutMultiplier(MULTIPLIER_MIN);
-  const bumpOnTie        = () => setPayoutMultiplier((m) => clamp1(m + 0.02));
+  const resetOnLoss      = () => setPayoutMultiplier((m) => clamp1(m - 0.148)); // tuned soft decay
+  const bumpOnTie        = () => setPayoutMultiplier((m) => clamp1(m + 0.045)); // tuned tie bump
 
-  const [cardsDrawn, setCardsDrawn] = useState(false);
+  // removed unused cardsDrawn flag
   const [cardsSettled, setCardsSettled] = useState(false);
   const autoRollRef = useRef(false);
 
@@ -268,12 +268,13 @@ export default function Game() {
 
   // BIG WIN overlay
   const [bigWin, setBigWin] = useState(null);
+  const bigWinTimerRef = useRef(null);
   const triggerBigWin = ({ badge, title = "BIG WIN!", note = null, ttl = 3200 }) => {
     setBigWin({ id: Date.now(), badge, title, note });
-    window.clearTimeout(triggerBigWin._t);
-    triggerBigWin._t = window.setTimeout(() => setBigWin(null), ttl);
+    if (bigWinTimerRef.current) window.clearTimeout(bigWinTimerRef.current);
+    bigWinTimerRef.current = window.setTimeout(() => setBigWin(null), ttl);
   };
-  useEffect(() => () => window.clearTimeout(triggerBigWin._t), []);
+  useEffect(() => () => { if (bigWinTimerRef.current) window.clearTimeout(bigWinTimerRef.current); }, []);
 
   // Modals
   const [walletOpen, setWalletOpen] = useState(false);
@@ -284,9 +285,19 @@ export default function Game() {
   const openRules = () => setRulesOpen(true);
   const closeRules = () => setRulesOpen(false);
 
+  // Close Rules overlay on ESC
+  useEffect(() => {
+    if (!rulesOpen) return;
+    const onKey = (e) => { if (e.key === "Escape") closeRules(); };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [rulesOpen]);
+
   // Side bets (SC only)
   const [sideColorOn, setSideColorOn] = useState(false);
   const [sideDiceOn, setSideDiceOn] = useState(false);
+  const sideActiveRef = useRef({ color: false, dice: false });
+  const waitingSideTxRef = useRef(false);
 
   // SC Jackpot pool HUD
   const [poolSC, setPoolSC] = useState(0);
@@ -339,17 +350,13 @@ export default function Game() {
     const resetBoard = () => {
       setBet(0);
       setPlacedChips([]);
-      setRoundResult("");
-      setCardsDrawn(false);
+  setRoundResult("");
       setRoundOver(true);
       setIsRolling(false);
       setCardValue1("");
       setCardValue2("");
-      setDiceValue1(0);
-      setDiceValue2(0);
-      setUiStake(0);
-      setUiSideStake(0);
-      setPayoutMultiplier(1.05);
+  // reset streak to floor
+  setPayoutMultiplier(MULTIPLIER_MIN);
       settledRoundRef.current = -1;
       hasRolledRef.current = false;
       setCardsSettled(false);
@@ -625,17 +632,105 @@ export default function Game() {
   const chipValues = [1, 5, 10, 25, 50, 100, 250, 500, 1000];
 
   const onPickChip = (value) => {
-    if (!roundOver || isRolling || !authed) return;
+    if (!roundOver || isRolling || !authed || isRebetting) return;
     setBet((b) => Number((Number(b) + value).toFixed(2)));
     setPlacedChips((prev) => [...prev, { id: nextChipId.current++, value }]);
   };
 
+  // Remember the most recent completed round’s bet + side toggles for Rebet
+  const snapshotLastBet = () => {
+    // Prefer the bet amount locked at deal time for reliability
+    const dealAmt = Number(betAtDealRef.current) || 0;
+    const amt = dealAmt > 0 ? dealAmt : (Number(bet) || 0);
+    lastBetRef.current = amt;
+    setLastBetAmt(amt);
+    // Capture the visual chip stack before we clear it
+    lastPlacedChipsRef.current = placedChips.slice();
+    // Use the side bets that were actually locked for the round
+    lastSideColorRef.current = !!sideActiveRef.current.color;
+    lastSideDiceRef.current = !!sideActiveRef.current.dice;
+  };
+
+  // Clear the current UI bet state (does NOT snapshot)
+  const clearBetUI = () => {
+    setBet(0);
+    setPlacedChips([]);
+    setSideColorOn(false);
+    setSideDiceOn(false);
+    sideActiveRef.current = { color: false, dice: false };
+  };
+
   const clearBet = () => {
     if (roundOver && !isRolling) {
-      setBet(0);
-      setPlacedChips([]);
+      // user-requested: manual Clear Bet should NOT snapshot last bet
+      clearBetUI();
     }
   };
+
+  const rebet = () => {
+    if (!roundOver || isRolling || !authed || isRebetting) return;
+    const lb = Number(lastBetAmt || lastBetRef.current) || 0;
+    if (lb <= 0) return;
+
+    // cancel any pending rebet timers just in case
+    if (rebetTimersRef.current.length) {
+      rebetTimersRef.current.forEach((t) => clearTimeout(t));
+      rebetTimersRef.current = [];
+    }
+
+    setIsRebetting(true);
+    // start from empty and drop chips in sequentially for a visual effect
+    setBet(0);
+    setPlacedChips([]);
+
+    let chips = (lastPlacedChipsRef.current || []).slice();
+    // Fallback: if we somehow didn’t capture chip breakdown, synthesize from amount greedily
+    if (chips.length === 0 && lb > 0) {
+      const denoms = [1000, 500, 250, 100, 50, 25, 10, 5, 1];
+      let rem = Math.floor(lb); // use whole units only since our chip set is integer
+      const synth = [];
+      for (const d of denoms) {
+        while (rem >= d) { synth.push({ value: d }); rem -= d; }
+        if (rem === 0) break;
+      }
+      chips = synth;
+    }
+    const delay = Math.max(28, Math.min(80, 600 / Math.max(1, chips.length))); // faster for many chips
+    if (chips.length === 0) {
+      // No chip breakdown available; just set the amount instantly
+      setBet(lb);
+      setIsRebetting(false);
+    } else {
+      const totalMs = (chips.length - 1) * delay + 120;
+      // safety: ensure we always exit rebetting
+      const safety = setTimeout(() => setIsRebetting(false), totalMs + 400);
+      rebetTimersRef.current.push(safety);
+      chips.forEach((c, i) => {
+        const tid = setTimeout(() => {
+          setPlacedChips((prev) => [...prev, { id: nextChipId.current++, value: c.value }]);
+          setBet((b) => Number((Number(b) + (Number(c.value) || 0)).toFixed(2)));
+          if (i === chips.length - 1) {
+            // after last chip, finish
+            setIsRebetting(false);
+          }
+        }, i * delay);
+        rebetTimersRef.current.push(tid);
+      });
+    }
+
+    // restore side bets immediately (UI toggle state)
+    setSideColorOn(!!lastSideColorRef.current);
+    setSideDiceOn(!!lastSideDiceRef.current);
+    sideActiveRef.current = { color: !!lastSideColorRef.current, dice: !!lastSideDiceRef.current };
+  };
+
+  // cleanup any rebet timers on unmount
+  useEffect(() => () => {
+    if (rebetTimersRef.current.length) {
+      rebetTimersRef.current.forEach((t) => clearTimeout(t));
+      rebetTimersRef.current = [];
+    }
+  }, []);
 
   const getCardNumber = (card) => {
     if (!card) return null;
@@ -661,7 +756,7 @@ export default function Game() {
 
     setRoundResult("");
     setRoundOver(false);
-    setCardsDrawn(true);
+  // set cards drawn -> no longer tracked
 
     hasRolledRef.current = false;
     settledRoundRef.current = -1;
@@ -687,8 +782,7 @@ export default function Game() {
 
     // Lock UI amounts for this round
     betAtDealRef.current = betNum;
-    setUiStake(betNum);
-    setUiSideStake(sideNeed);
+  // removed UI stake mirrors
     sideActiveRef.current = { color: !!sideColorOn, dice: !!sideDiceOn };
 
     // Immediately reserve SC: subtract stake + side bet tickets
@@ -714,7 +808,7 @@ export default function Game() {
           scAdjust(+sideNeed, "Refund side tickets (contribution failed)").catch(()=>{});
           sideActiveRef.current = { color: false, dice: false };
           setRoundResult((prev) => (prev ? prev + " " : "") + `Side bet contribution failed: ${e.message}`);
-          setUiSideStake(0);
+          // removed UI stake mirror
         })
         .finally(() => {
           waitingSideTxRef.current = false;
@@ -732,20 +826,6 @@ export default function Game() {
     return () => window.removeEventListener("resize", setH);
   }, []);
 
-  const [isWide, setIsWide] = useState(() => window.innerWidth >= 992);
-  useEffect(() => {
-    const onResize = () => setIsWide(window.innerWidth >= 992);
-    window.addEventListener("resize", onResize, { passive: true });
-    return () => window.removeEventListener("resize", onResize);
-  }, []);
-
-  const rollDice = () => {
-    if (roundOver || !cardsDrawn || isRolling) return;
-    if (!cardsSettled) return;
-    hasRolledRef.current = true;
-    setIsRolling(true);
-    setCurrentRoundId((id) => id + 1);
-  };
 
   useEffect(() => {
     if (!cardsSettled) return;
@@ -753,7 +833,10 @@ export default function Game() {
     if (roundOver || isRolling) return;
     autoRollRef.current = false;
     setRollAnimKeyLocal((k) => k + 1);
-    rollDice();
+    // inline roll to avoid missing dep warning
+    hasRolledRef.current = true;
+    setIsRolling(true);
+    setCurrentRoundId((id) => id + 1);
   }, [cardsSettled, roundOver, isRolling]);
 
   const startGame = async () => {
@@ -809,8 +892,7 @@ export default function Game() {
 
     if (!Number.isFinite(betSnap) || betSnap <= 0) {
       setRoundOver(true);
-      setUiStake(0);
-      setUiSideStake(0);
+  // removed UI stake mirrors
       return;
     }
 
@@ -870,7 +952,7 @@ export default function Game() {
       } else if (sum > lo && sum < hi) {
         const streak = payoutMultiplierRef.current || 1;
         const B = spreadBonus(lo, hi);
-        const rawProfit = betSnap * Math.max(0, streak - 1) * B;
+  const rawProfit = betSnap * Math.max(0, (streak - 1) + BETWEEN_BASE) * B; // Option A: base profit component
         const totalProfit = rawProfit * HOUSE_EDGE;
 
         if (totalProfit > 0) await scAdjust(+totalProfit, "Between win (with spread bonus)");
@@ -906,11 +988,12 @@ export default function Game() {
       showToast("refunded", 0, "Settle Error");
     }
 
-    setUiStake(0);
-    setRoundOver(true);
-    setSideColorOn(false);
-    setSideDiceOn(false);
-    sideActiveRef.current = { color: false, dice: false };
+  // removed UI stake mirror
+  setRoundOver(true);
+
+  // End of round: remember this bet and side toggles, then clear UI
+  snapshotLastBet();
+  clearBetUI();
   };
 
   // ---------- Render ----------
@@ -937,23 +1020,20 @@ export default function Game() {
     <>
       <NavBar />
 
-      {/* subtle fixed beam under navbar (optional decorative element) */}
-      <div className="war-top-glow-fixed" aria-hidden="true" />
-
       {/* small top margin so game sits just below the NavBar
           also expose the navbar height as a CSS variable so the global LED aligns */
       }
       <Container
         fluid
-        className="px-0 mt-0 mb-4"
-        style={{ ['--nav-height']: 'var(--nav-height, 64px)' }}
+        className="px-0 mt-0 mb-4 roc-wrap"
+        style={{ '--nav-height': 'var(--nav-height, 64px)' }}
       >
 
         {/* push the poker table down and use the shared page background (not green felt) */}
         <div
           className="poker-table"
           style={{
-            paddingTop: "calc(var(--nav-height, 64px) + 12px)",
+            paddingTop: isPhone ? 0 : "calc(var(--nav-height, 64px) + 12px)",
             background: "radial-gradient(60% 80% at 50% 10%, #3b1d55 0%, #140a1c 55%, #0a0613 75%, #000 100%)",
             boxSizing: "border-box"
           }}
@@ -971,7 +1051,7 @@ export default function Game() {
               {/* Calm purple LED strip anchored at the top of this table surface.
                   --led-duration controls speed; set to a long value for a calming motion. */}
               <div className="led-inline" aria-hidden="true">
-                <div className="led-run led-run-inline" style={{ ['--led-duration']: '18s' }} />
+                <div className="led-run led-run-inline" style={{ '--led-duration': '18s' }} />
               </div>
 
                <div className="war-over-table-glow" aria-hidden="true" />
@@ -1039,7 +1119,7 @@ export default function Game() {
                   <div className="small-muted mb-2">Cards</div>
                   <div className="cards-zone" style={{ background: "transparent" }}>
                    
-<CardDealTwo_Meuk
+<CardDealTwoMeuk
   basePath="/cards/meuk"
   c1={cardValue1}
   c2={cardValue2}
@@ -1050,7 +1130,7 @@ export default function Game() {
   cameraZoom={isPhone ? 180 : 150}
 
   /* Move the DECK far to the left so it’s not under the dealt cards */
-  deckX={isPhone ? -1.15 : 1.25}
+  deckX={isPhone ? -1.5 : 1.60}
   deckY={isPhone ? 0.0 : 0.0}
 
   /* Center the two dealt cards */
@@ -1091,8 +1171,6 @@ export default function Game() {
       if (settledRoundRef.current === currentRoundId) return;
       settledRoundRef.current = currentRoundId;
       hasRolledRef.current = false;
-      setDiceValue1(d1);
-      setDiceValue2(d2);
       try { await finishRoundWith(d1, d2); }
       finally { setIsRolling(false); }
     }}
@@ -1239,30 +1317,12 @@ export default function Game() {
               {/* Bottom Controls */}
               <Row className="g-2 mt-3">
                 <Col xs={12} lg={8}>
-                 <div className="chip-tray wide">
-  {/* Desktop/Tablet (>= sm): the original tray stays the same */}
-  <div className="d-none d-sm-flex flex-wrap align-items-center gap-2">
-    {chipValues.map((v) => (
-      <button
-        key={v}
-        className="chip use-img me-2"
-        data-val={v}
-        style={{ "--chip-img": `url(${CHIP_SRC[v]})` }}
-        onClick={() => onPickChip(v)}
-        title={`Add ${v}`}
-        disabled={!authed}
-      >
-        <span className="chip-inner"><span className="chip-text">{v}</span></span>
-      </button>
-    ))}
-    <BsButton size="sm" variant="outline-light" onClick={clearBet} className="chip-clear">
-      Clear
-    </BsButton>
-  </div>
-
-  {/* Phone (< sm): NEW horizontally scrollable chip row */}
-  <div className="chip-scroller d-sm-none" aria-label="Chip values">
-    <div className="chip-track">
+                  {/* Clamp to container width to avoid any right-side bleed on phones */}
+                  <div className="chip-tray-clamp">
+                  <div className="chip-tray wide">
+  {/* Desktop/Tablet (>= sm): chips left, controls right */}
+  <div className="d-none d-sm-flex align-items-center justify-content-between w-100">
+    <div className="d-flex flex-wrap align-items-center gap-2">
       {chipValues.map((v) => (
         <button
           key={v}
@@ -1276,8 +1336,56 @@ export default function Game() {
           <span className="chip-inner"><span className="chip-text">{v}</span></span>
         </button>
       ))}
-      <BsButton size="sm" variant="outline-light" onClick={clearBet} className="chip-clear ms-1">
-        Clear
+    </div>
+
+    <div className="d-flex align-items-center gap-2">
+      <BsButton size="sm" variant="outline-light" onClick={clearBet} className="chip-clear" disabled={isRebetting}>
+        Clear Bet
+      </BsButton>
+
+      <BsButton size="sm" variant="outline-light" onClick={rebet} className="chip-rebet" disabled={!authed || !roundOver || isRolling || isRebetting || (Number(lastBetAmt ?? lastBetRef.current) || 0) <= 0}>
+        Rebet
+      </BsButton>
+
+      <BsButton
+        variant="outline-light"
+        className="start-game-btn"
+        style={{
+          minWidth: 220,
+          paddingLeft: 18,
+          paddingRight: 18,
+          boxShadow: "0 8px 30px rgba(150,100,230,0.35), 0 0 18px rgba(150,100,230,0.12)",
+          borderRadius: 8,
+        }}
+        onClick={startGame}
+        disabled={!roundOver || isRolling || (Number(bet) || 0) <= 0 || !authed || isRebetting}
+      >
+        Start Game
+      </BsButton>
+    </div>
+  </div>
+
+  {/* Phone (< sm): horizontally scrollable chip row using Bootstrap overflow + nowrap */}
+  <div className="chip-scroller d-sm-none overflow-auto w-100" aria-label="Chip values">
+    <div className="chip-track d-flex flex-nowrap align-items-center">
+      {chipValues.map((v) => (
+        <button
+          key={v}
+          className="chip use-img"
+          data-val={v}
+          style={{ "--chip-img": `url(${CHIP_SRC[v]})` }}
+          onClick={() => onPickChip(v)}
+          title={`Add ${v}`}
+          disabled={!authed}
+        >
+          <span className="chip-inner"><span className="chip-text">{v}</span></span>
+        </button>
+      ))}
+      <BsButton size="sm" variant="outline-light" onClick={clearBet} className="chip-clear ms-1 flex-shrink-0" disabled={isRebetting}>
+        Clear Bet
+      </BsButton>
+      <BsButton size="sm" variant="outline-light" onClick={rebet} className="chip-rebet ms-1 flex-shrink-0" disabled={!authed || !roundOver || isRolling || isRebetting || (Number(lastBetAmt ?? lastBetRef.current) || 0) <= 0}>
+        Rebet
       </BsButton>
     </div>
 
@@ -1294,19 +1402,20 @@ export default function Game() {
       </span>
     )}
   </div>
-</div>
 
-                </Col>
-
-                <Col xs={12} lg={4}>
-                  <BsButton
-                    className="w-100"
-                    variant="primary"
-                    onClick={startGame}
-                    disabled={!roundOver || isRolling || (Number(bet) || 0) <= 0 || !authed}
-                  >
-                    Start Game
-                  </BsButton>
+  {/* Phone-only Start button so it’s always accessible */}
+  <div className="d-sm-none mt-2">
+    <BsButton
+      className="start-game-btn-mobile w-100"
+      variant="primary"
+      onClick={startGame}
+      disabled={!roundOver || isRolling || (Number(bet) || 0) <= 0 || !authed || isRebetting}
+    >
+      Start Game
+    </BsButton>
+  </div>
+                  </div>
+                  </div>
                 </Col>
 
                 <Col xs={12}>
@@ -1323,13 +1432,86 @@ export default function Game() {
                 </Col>
               </Row>
 
+              {/* Rules Overlay */}
+              {rulesOpen && (
+                <div className="rules-overlay" onClick={closeRules}>
+                  <div
+                    className="rules-card"
+                    role="dialog"
+                    aria-modal="true"
+                    aria-labelledby="roc-rules-title"
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    <div className="rules-header">
+                      <h4 id="roc-rules-title" className="mb-0">How to Play &amp; Rules</h4>
+                      <button type="button" className="btn-close" aria-label="Close" onClick={closeRules} />
+                    </div>
+                    <div className="rules-body">
+                      <section className="mb-3">
+                        <h6 className="mb-2">Goal</h6>
+                        <p className="small" style={{ color: "#9fb1c6" }}>
+                          Place your main bet in <strong>Stake Coins (SC)</strong>. Two cards are dealt, then the dice roll.
+                          Optional Side Bets (SC-only) can win the entire SC Jackpot pool.
+                        </p>
+                      </section>
+
+                      <section className="mb-3">
+                        <h6 className="mb-2">Main Bet — Payouts</h6>
+                        <ul className="small" style={{ color: "#cfe3ff", marginLeft: "1.1rem" }}>
+                          <li><strong>Exact Sum Jackpot:</strong> If dice total equals (card A + card B), you win <strong>3×</strong> profit × Streak Bonus; stake returned.</li>
+                          <li><strong>Ace + Snake Eyes:</strong> At least one Ace and dice are 1+1 → <strong>2×</strong> profit × Streak Bonus; stake returned.</li>
+                          <li><strong>Double Ace + Snake Eyes:</strong> Both Aces and dice 1+1 → <strong>10×</strong> profit × Streak Bonus; stake returned.</li>
+                          <li><strong>Between:</strong> Dice total strictly between the two card values → profit = (Streak Bonus − 1) × bet × <em>Spread Bonus</em> (up to 1.30×); stake returns.</li>
+                          <li><strong>Tie:</strong> Dice total equals a single card value → stake returns.</li>
+                          <li><strong>Loss:</strong> Otherwise, bet is lost.</li>
+                        </ul>
+                        <p className="small" style={{ color: "#9fb1c6" }}>
+                          Profits pay a small rake; stake is never raked. Face cards are 10. Aces are 1. Streak starts at 1.05× and caps at 2.00×.
+                        </p>
+                      </section>
+
+                      <section className="mb-3">
+                        <h6 className="mb-2">Streak &amp; Spread</h6>
+                        <ul className="small" style={{ color: "#cfe3ff", marginLeft: "1.1rem" }}>
+                          <li><strong>Streak Bonus:</strong> Each win nudges your multiplier up (starts at 1.05×, caps at 2.00×). Ties slightly bump it; losses reset to 1.05×.</li>
+                          <li><strong>Spread Bonus:</strong> Tighter gaps between your two card values increase the Between win profit up to 1.30×.</li>
+                        </ul>
+                      </section>
+
+                      <section className="mb-3">
+                        <h6 className="mb-2">Side Bets — SC Jackpot Tickets (1 SC each)</h6>
+                        <ul className="small" style={{ color: "#cfe3ff", marginLeft: "1.1rem" }}>
+                          <li><strong>Card Side:</strong> Jackpot only when both cards are Aces and dice are 1 &amp; 1.</li>
+                          <li><strong>Dice Side:</strong> Dice are an adjacent pair and cards are the next adjacent pair, forming a 4-number run (either order).</li>
+                        </ul>
+                        <p className="small" style={{ color: "#9fb1c6" }}>
+                          Side-bet funds top up the SC pool immediately. Jackpots pay from the pool separately from your main bet.
+                        </p>
+                      </section>
+
+                      <section className="mb-1">
+                        <h6 className="mb-2">Examples</h6>
+                        <ul className="small" style={{ color: "#cfe3ff", marginLeft: "1.1rem" }}>
+                          <li><strong>Between:</strong> Cards 7 and 10; dice total 8 or 9 → win (profit from Streak × Spread), stake returns.</li>
+                          <li><strong>Exact Sum:</strong> Cards Ace (1) and 5; dice total 6 → Exact Sum Jackpot (3× profit), stake returns.</li>
+                          <li><strong>Tie:</strong> Cards 4 and Queen (10); dice total 10 → tie, stake returns.</li>
+                        </ul>
+                      </section>
+                    </div>
+                    <div className="rules-actions">
+                      <BsButton variant="primary" onClick={closeRules}>Got it</BsButton>
+                    </div>
+                  </div>
+                </div>
+              )}
+
               {/* Wallet Modal */}
-              <Modal show={walletOpen} onHide={closeWallet} centered dialogClassName="wallet-dark">
-                <div style={{ background: "#12171d", color: "#e7efff", border: "1px solid #1f2a36", borderRadius: 6 }}>
+              <Modal show={walletOpen} onHide={closeWallet} centered dialogClassName="wallet-dark" scrollable>
+                <div style={{ background: "#12171d", color: "#e7efff", border: "1px solid #1f2a36", borderRadius: 6, maxHeight: "calc(100dvh - 24px)" }}>
                   <Modal.Header closeButton style={{ borderBottom: "1px solid #1f2a36" }}>
                     <Modal.Title>Wallet</Modal.Title>
                   </Modal.Header>
-                  <Modal.Body>
+                  <Modal.Body style={{ maxHeight: "calc(100dvh - 180px)", overflowY: "auto", paddingBottom: "calc(env(safe-area-inset-bottom, 0px) + 8px)" }}>
                     <Tabs defaultActiveKey="deposit" id="wallet-tabs" className="mb-3">
                       <Tab eventKey="deposit" title="Deposit">
                         {/* SC balance */}
@@ -1449,7 +1631,7 @@ export default function Game() {
                               <li><strong>Exact Sum Jackpot:</strong> If dice total equals (card A + card B), you win <strong>3×</strong> profit × Streak Bonus; stake returned.</li>
                               <li><strong>Ace + Snake Eyes:</strong> At least one Ace and dice are 1+1 → <strong>2×</strong> profit × Streak Bonus; stake returned.</li>
                               <li><strong>Double Ace + Snake Eyes:</strong> Both Aces and dice 1+1 → <strong>10×</strong> profit × Streak Bonus; stake returned.</li>
-                              <li><strong>Between:</strong> Dice total strictly between card values → profit = (Streak Bonus − 1) × bet × <em>Spread Bonus</em> (up to 1.30×); stake returns.</li>
+                              <li><strong>Between:</strong> Dice total strictly between the two card values → profit = (Streak Bonus − 1) × bet × <em>Spread Bonus</em> (up to 1.30×); stake returns.</li>
                               <li><strong>Tie:</strong> Dice total equals a single card value → stake returns.</li>
                               <li><strong>Loss:</strong> Otherwise, bet is lost.</li>
                             </ul>

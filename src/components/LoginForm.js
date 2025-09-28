@@ -13,8 +13,12 @@ const LS_PUBLIC = "roc_public";    // cached wallet pubkey
 function resolveApiBase() {
   if (process.env.REACT_APP_API_BASE) return process.env.REACT_APP_API_BASE;
   if (typeof window !== "undefined") {
-    const { protocol, hostname } = window.location; // works for 192.168.x.x too
-    return `${protocol}//${hostname}:3002`;
+    const { protocol, hostname } = window.location; // supports 192.168.x.x
+    const envHost = (process.env.REACT_APP_SERVER_HOST || "").trim();
+    const winHost = (window.SERVER_HOST ? String(window.SERVER_HOST).trim() : "");
+    let lsHost = ""; try { lsHost = (localStorage.getItem("serverHost") || "").trim(); } catch {}
+    const host = envHost || winHost || lsHost || hostname;
+    return `${protocol}//${host}:3002`;
   }
   return "http://localhost:3002";
 }
@@ -77,9 +81,10 @@ export default function LoginForm() {
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.message || "Login failed");
 
-      // 2) save auth
-      localStorage.setItem("token", data.token);
-      localStorage.setItem("username", data.username);
+  // 2) save auth
+  localStorage.setItem("token", data.token);
+  localStorage.setItem("username", data.username);
+  if (data.userId != null) localStorage.setItem("userId", String(data.userId));
 
       // 3) load profile for wallet pubkey (server returns `public_key`)
       let walletPublic = null;
@@ -92,6 +97,7 @@ export default function LoginForm() {
         if (r2.ok) {
           const me = await r2.json().catch(() => ({}));
           walletPublic = me.public_key || me.wallet_public || null;
+          if (me.userId != null) localStorage.setItem("userId", String(me.userId));
         }
       } catch {}
 

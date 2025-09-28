@@ -5,8 +5,8 @@
 
 .cf-screen {
   min-height: 100dvh;
-  background: #0b1220;
-  color: #e5e7eb;
+  background: var(--bg-body);
+  color: var(--text);
 }
 
 /* Fixed top nav */
@@ -15,7 +15,7 @@
   inset: 0 0 auto 0;
   height: var(--nav-h);
   z-index: 1000;
-  background: linear-gradient(120deg, #6d28d9, #2563eb, #06b6d4);
+  background: linear-gradient(180deg, #171717, #0f0f0f);
   color: #fff;
   box-shadow: 0 6px 18px rgba(0,0,0,.35);
 }
@@ -39,10 +39,11 @@
 
 /* Scrollable content area */
 .app-content {
-  min-height: calc(100dvh - var(--nav-h));
-  overflow-y: auto;
+  min-height: calc(100dvh - var(--nav-h) - var(--footer-h, 0px));
+  overflow-y: hidden;
   -webkit-overflow-scrolling: touch;
-  padding: 12px;
+  padding: 12px 12px 0;
+  color: var(--text);
 }
 
 /* When GameBoard is embedded, hide its inner header/spacer */
@@ -51,4 +52,53 @@
 
 /* Let the embedded GameBoard breathe and scroll past the bottom */
 .cf-embed .container { padding: 0 !important; max-width: 100% !important; }
-.cf-embed .board-card-wrap { margin-bottom: 120px !important; }
+/* Remove extra bottom margin when embedded to avoid extra space */
+/* .cf-embed .board-card-wrap { margin-bottom: 120px !important; } */
+
+/* Waiting overlay parity (match Raumschach/Chess/Checkers) */
+.cf-c4 .waiting-overlay { background: rgba(9,12,18, .45); backdrop-filter: blur(2px); -webkit-backdrop-filter: blur(2px); }
+.cf-c4 .popup-card{
+  width: min(92vw, 520px);
+  background: rgba(17,24,39,.85);
+  border: 1px solid rgba(255,255,255,.15);
+  color: #fff; border-radius: 14px;
+  box-shadow: 0 8px 28px rgba(0,0,0,.45);
+  padding: 18px 18px 14px;
+  backdrop-filter: blur(8px);
+  z-index: 8;
+}
+.cf-c4 .popup-title{ font-size: 28px; font-weight: 800; letter-spacing: .06em; text-align:center; margin-bottom: 8px; }
+.cf-c4 .popup-body{ text-align:center; color:#cbd5e1; margin-bottom: 12px; }
+.cf-c4 .popup-actions{ display:flex; gap: 10px; justify-content:center; }
+
+/* Prevent horizontal scroll and make pre-game setup full-bleed on phones */
+.cf-screen, .cf-c4, .cf-c4 .app-content { overflow-x: hidden; }
+
+/* Ensure pre-join container stretches edge-to-edge */
+.cf-c4 .prejoin-float { margin: 0 !important; width: 100% !important; }
+
+/* Hide the shared GameSetup top glow for C4 to avoid any purple band at the top */
+.cf-c4 .gs-top-glow { display: none !important; }
+
+@media (max-width: 600px) {
+  /* Remove all padding under the navbar on mobile for true edge-to-edge, incl. top */
+  .cf-c4 .app-content { padding: 0 !important; }
+
+  /* Neutralize GameSetup mobile hack and truly go edge-to-edge */
+  .cf-c4 .gs-wrap {
+    position: static !important;
+    left: auto !important; right: auto !important;
+    margin-left: 0 !important; margin-right: 0 !important;
+    width: 100% !important;
+    padding: 0 !important;
+    min-height: calc(100dvh - var(--nav-h) - var(--footer-h, 0px)) !important;
+    display: grid;
+    align-items: start;
+    justify-items: stretch;
+  }
+  .cf-c4 .gs-card {
+    border-radius: 0 !important;
+    width: 100% !important;
+    max-width: 100% !important;
+  }
+}

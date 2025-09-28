@@ -21,6 +21,7 @@
     "bootstrap-icons": "^1.13.1",
     "cannon-es": "^0.20.0",
     "canvas-confetti": "^1.9.3",
+    "chess.js": "^1.0.0",
     "cors": "^2.8.5",
     "deck-of-cards": "^0.1.8",
     "ethers": "^6.15.0",
@@ -52,7 +53,16 @@
     "start": "react-scripts start",
     "build": "react-scripts build",
     "test": "react-scripts test",
-    "eject": "react-scripts eject"
+    "eject": "react-scripts eject",
+    "serve:api:unified": "node scripts/start-unified.js",
+    "serve:api": "node server/server.js",
+    "serve:war": "node src/components/games/War/server.js",
+    "serve:checkers": "node src/components/games/Checkers/server.js",
+    "serve:chess": "node src/components/games/Chess/server.js",
+    "serve:raum": "node src/components/games/Chess3D/server.js",
+    "serve:c4": "node src/components/games/ConnectFour/server.js",
+  "serve:battleship": "node src/components/games/Battleship/server.js",
+    "run:mc": "node src/components/games/MonteCarloRollOfCards/server.js"
   },
   "eslintConfig": {
     "extends": [
@@ -73,7 +83,9 @@
     ]
   },
   "devDependencies": {
+    "@gltf-transform/cli": "^4.2.1",
     "buffer": "^6.0.3",
+    "gltfpack": "^0.25.0",
     "http-proxy-middleware": "^2.0.6",
     "process": "^0.11.10",
     "react-scripts": "^5.0.1"

@@ -1,0 +1,14 @@
+/* Matchmaking overlay styles — mirror other games for consistency */
+.match-overlay { position: fixed; inset: 0; z-index: 1050; display: grid; place-items: center; background: rgba(9,12,18,.55); backdrop-filter: blur(2px); -webkit-backdrop-filter: blur(2px); padding: 16px; overflow: auto; box-sizing: border-box; }
+.match-card { width: 100%; max-width: 860px; background: var(--card-bg); border:1px solid var(--card-border); color: var(--text); border-radius:16px; box-shadow:0 1.25rem 2.5rem rgba(0,0,0,.35); overflow:hidden; }
+.match-header { display:flex; align-items:center; justify-content:space-between; padding:.8rem 1rem; color:#fff; background: linear-gradient(120deg,#6d28d9,#2563eb,#06b6d4); }
+.match-body { display:grid; grid-template-columns:1fr 40px 1fr; gap:0; padding:1rem; }
+.match-col { padding:.75rem; display:grid; align-content:center; gap:.75rem; text-align:center; }
+.match-divider { display:grid; place-items:center; color: var(--text); font-weight:900; }
+.mm-avatar { width: clamp(84px, 18vw, 120px); height: clamp(84px, 18vw, 120px); border-radius:999px; margin-inline:auto; display:grid; place-items:center; background:#0b1220; box-shadow: 0 10px 22px rgba(0,0,0,.35), inset 0 2px 0 rgba(255,255,255,.06); border:3px solid rgba(255,255,255,.4); color:#0f172a; font-weight:900; font-size: clamp(40px, 8vw, 64px); }
+.mm-pill { display:inline-flex; align-items:center; gap:.4rem; padding:.28rem .55rem; border-radius:999px; background: rgba(255,255,255,.10); color:#fff; font-weight:800; font-size:.9rem; line-height:1; max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
+.mm-dots { display:flex; gap:6px; align-items:center; justify-content:center; }
+.mm-dot { width:8px; height:8px; border-radius:999px; background: rgba(255,255,255,.6); animation: pulse 1.2s infinite ease-in-out; }
+.mm-dot:nth-child(2){ animation-delay:.2s; } .mm-dot:nth-child(3){ animation-delay:.4s; }
+@keyframes pulse { 0%, 80%, 100% { transform: scale(.7); opacity:.5; } 40% { transform: scale(1); opacity:1; } }
+.mm-cancel { appearance: none; border: 0; background: rgba(0,0,0,.25); color: #fff; font-weight: 800; padding: .4rem .8rem; border-radius: 999px; }
