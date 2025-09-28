@@ -1,13 +1,14 @@
 // server.js
-// Robust env loading: prefer ENV_FILE, else .env.production in prod, else .env at repo root
+// Robust env loading: prefer ENV_FILE, else .env.production, else .env at repo root
 const fs = require('fs');
 const path = require('path');
 const dotenv = require('dotenv');
 try {
   const root = path.join(__dirname, '..');
+  // Always try .env.production before .env so hosted environments can pick it up without NODE_ENV
   const candidates = [
     process.env.ENV_FILE,
-    process.env.NODE_ENV === 'production' ? '.env.production' : null,
+    '.env.production',
     '.env'
   ].filter(Boolean).map((p) => path.isAbsolute(p) ? p : path.join(root, p));
   for (const f of candidates) {
@@ -183,7 +184,7 @@ function maxSpendableRounded(asset, bal) {
 /* -------------------- DB -------------------- */
 const DB_OPTIONAL = /^(1|true)$/i.test(String(process.env.DB_OPTIONAL || ''));
 let dbReady = false;
-const db = mysql.createPool({
+const dbConfig = {
   host: process.env.MYSQL_HOST || "127.0.0.1",
   user: process.env.MYSQL_USER || "root",
   password: process.env.MYSQL_PASSWORD || "",
@@ -197,7 +198,9 @@ const db = mysql.createPool({
     const reject = !(/0|false/i.test(String(process.env.MYSQL_SSL_REJECT_UNAUTH || '')));
     return { rejectUnauthorized: reject };
   })(),
-});
+};
+console.log(`[DB] Using host ${dbConfig.host}:${dbConfig.port} ssl=${!!dbConfig.ssl}`);
+const db = mysql.createPool(dbConfig);
 // DB health endpoint available whether or not DB is ready
 app.get('/health/db', (_req, res) => {
   if (!dbReady) return res.status(503).json({ ok: false, error: 'database unavailable' });
@@ -258,36 +261,7 @@ db.getConnection((err, conn) => {
   );
 });
 
-db.query(
-  "CREATE TABLE IF NOT EXISTS jackpot_sc (id INT PRIMARY KEY, pool_sc DECIMAL(32,8) NOT NULL DEFAULT 0)",
-  () => db.query("INSERT IGNORE INTO jackpot_sc (id, pool_sc) VALUES (1, 0)")
-);
-db.query(
-  "ALTER TABLE users ADD COLUMN IF NOT EXISTS xlm_balance DECIMAL(32,8) NOT NULL DEFAULT 0",
-  (e) => {
-    if (e && !/Duplicate column/i.test(String(e.message)))
-      console.warn("ALTER users add xlm_balance failed:", e.message);
-  }
-);
-db.query(
-  "ALTER TABLE users ADD COLUMN IF NOT EXISTS sc_balance DECIMAL(32,8) NOT NULL DEFAULT 0",
-  (e) => {
-    if (e && !/Duplicate column/i.test(String(e.message)))
-      console.warn("ALTER users add sc_balance failed:", e.message);
-    else
-      db.query(
-        "UPDATE users SET sc_balance = coin_balance WHERE (sc_balance = 0 OR sc_balance IS NULL) AND coin_balance IS NOT NULL"
-      );
-  }
-);
-
-// Simple key-value app config for global settings
-db.query(
-  "CREATE TABLE IF NOT EXISTS app_config (k VARCHAR(64) PRIMARY KEY, v TEXT NOT NULL)",
-  (e) => {
-    if (e) console.warn("CREATE app_config failed:", e.message);
-  }
-);
+// Note: schema migrations are executed after a successful DB connection using safeQuery above.
 
 /* -------------------- Auth -------------------- */
 function requireAuth(req, _res, next) {

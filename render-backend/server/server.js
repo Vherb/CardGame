@@ -1,5 +1,21 @@
 // server.js — full copy of original unified server with adjusted game paths for Render bundle
-require("dotenv").config();
+// Robust env loading similar to ../server/server.js
+const fs = require('fs');
+const path = require('path');
+const dotenv = require('dotenv');
+try {
+  const root = path.join(__dirname, '..');
+  const candidates = [
+    process.env.ENV_FILE,
+    '.env.production',
+    '.env',
+    path.join('..', '.env.production'),
+    path.join('..', '.env')
+  ]
+    .filter(Boolean)
+    .map((p) => path.isAbsolute(p) ? p : path.join(root, p));
+  for (const f of candidates) { if (fs.existsSync(f)) { dotenv.config({ path: f }); break; } }
+} catch { try { require('dotenv').config(); } catch {} }
 // Ensure game WS modules run in unified-attach mode and do NOT start standalone servers
 process.env.UNIFIED_WS = '1';
 
@@ -169,14 +185,23 @@ function maxSpendableRounded(asset, bal) {
 /* -------------------- DB -------------------- */
 const DB_OPTIONAL = /^(1|true)$/i.test(String(process.env.DB_OPTIONAL || ''));
 let dbReady = false;
-const db = mysql.createPool({
+const dbConfig = {
   host: process.env.MYSQL_HOST || "127.0.0.1",
   user: process.env.MYSQL_USER || "root",
   password: process.env.MYSQL_PASSWORD || "",
   database: process.env.MYSQL_DB || "game",
   port: Number(process.env.MYSQL_PORT) || 3306,
   connectionLimit: 10,
-});
+  // Optional TLS for hosted MySQL (set MYSQL_SSL=1 and optionally MYSQL_SSL_REJECT_UNAUTH=0)
+  ssl: (() => {
+    const use = String(process.env.MYSQL_SSL || '').trim();
+    if (!use || use === '0' || /false/i.test(use)) return undefined;
+    const reject = !(/0|false/i.test(String(process.env.MYSQL_SSL_REJECT_UNAUTH || '')));
+    return { rejectUnauthorized: reject };
+  })(),
+};
+console.log(`[DB] Using host ${dbConfig.host}:${dbConfig.port} ssl=${!!dbConfig.ssl}`);
+const db = mysql.createPool(dbConfig);
 // DB health endpoint available whether or not DB is ready
 app.get('/health/db', (_req, res) => {
   if (!dbReady) return res.status(503).json({ ok: false, error: 'database unavailable' });
@@ -235,36 +260,7 @@ db.getConnection((err, conn) => {
   );
 });
 
-db.query(
-  "CREATE TABLE IF NOT EXISTS jackpot_sc (id INT PRIMARY KEY, pool_sc DECIMAL(32,8) NOT NULL DEFAULT 0)",
-  () => db.query("INSERT IGNORE INTO jackpot_sc (id, pool_sc) VALUES (1, 0)")
-);
-db.query(
-  "ALTER TABLE users ADD COLUMN IF NOT EXISTS xlm_balance DECIMAL(32,8) NOT NULL DEFAULT 0",
-  (e) => {
-    if (e && !/Duplicate column/i.test(String(e.message)))
-      console.warn("ALTER users add xlm_balance failed:", e.message);
-  }
-);
-db.query(
-  "ALTER TABLE users ADD COLUMN IF NOT EXISTS sc_balance DECIMAL(32,8) NOT NULL DEFAULT 0",
-  (e) => {
-    if (e && !/Duplicate column/i.test(String(e.message)))
-      console.warn("ALTER users add sc_balance failed:", e.message);
-    else
-      db.query(
-        "UPDATE users SET sc_balance = coin_balance WHERE (sc_balance = 0 OR sc_balance IS NULL) AND coin_balance IS NOT NULL"
-      );
-  }
-);
-
-// Simple key-value app config for global settings
-db.query(
-  "CREATE TABLE IF NOT EXISTS app_config (k VARCHAR(64) PRIMARY KEY, v TEXT NOT NULL)",
-  (e) => {
-    if (e) console.warn("CREATE app_config failed:", e.message);
-  }
-);
+// Note: schema migrations are executed after a successful DB connection using safeQuery above.
 
 /* -------------------- Auth -------------------- */
 function requireAuth(req, _res, next) {
