@@ -206,7 +206,7 @@ async function atspaceCall(path, method = 'GET', body) {
 let dbReady = false;
 const dbConfig = {
   host: process.env.MYSQL_HOST || "127.0.0.1",
-  user: process.env.MYSQL_USER || "root",
+  user: process.env.MYSQL_USER || "NeonGames",
   password: process.env.MYSQL_PASSWORD || "Ltmq6196!",
   database: process.env.MYSQL_DB || "NeonGames",
   port: Number(process.env.MYSQL_PORT) || 3306,
