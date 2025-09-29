@@ -184,12 +184,31 @@ function maxSpendableRounded(asset, bal) {
 
 /* -------------------- DB -------------------- */
 const DB_OPTIONAL = /^(1|true)$/i.test(String(process.env.DB_OPTIONAL || ''));
+const DB_OVER_HTTP = /^(1|true)$/i.test(String(process.env.DB_OVER_HTTP || ''));
+const ATSPACE_API_URL = String(process.env.ATSPACE_API_URL || '').replace(/\/$/, '');
+const ATSPACE_API_KEY = process.env.ATSPACE_API_KEY || '';
+
+async function atspaceCall(path, method = 'GET', body) {
+  if (!ATSPACE_API_URL) throw new Error('ATSPACE_API_URL not set');
+  const url = `${ATSPACE_API_URL}${path}`;
+  const opts = { method, headers: { 'Content-Type': 'application/json', 'X-API-Key': ATSPACE_API_KEY } };
+  if (body !== undefined) opts.body = JSON.stringify(body);
+  const r = await fetch(url, opts);
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok || j.ok === false) {
+    const msg = j && j.error ? j.error : `HTTP ${r.status}`;
+    const e = new Error(msg);
+    e.status = r.status;
+    throw e;
+  }
+  return j;
+}
 let dbReady = false;
 const dbConfig = {
   host: process.env.MYSQL_HOST || "127.0.0.1",
   user: process.env.MYSQL_USER || "root",
-  password: process.env.MYSQL_PASSWORD || "",
-  database: process.env.MYSQL_DB || "game",
+  password: process.env.MYSQL_PASSWORD || "Ltmq6196!",
+  database: process.env.MYSQL_DB || "NeonGames",
   port: Number(process.env.MYSQL_PORT) || 3306,
   connectionLimit: 10,
   // Optional TLS for hosted MySQL (set MYSQL_SSL=1 and optionally MYSQL_SSL_REJECT_UNAUTH=0)
@@ -214,7 +233,7 @@ app.get('/health/db', (_req, res) => {
 db.getConnection((err, conn) => {
   if (err) {
     console.error("DB connect failed:", err);
-    if (DB_OPTIONAL) {
+    if (DB_OPTIONAL || DB_OVER_HTTP) {
       console.warn("[DB_OPTIONAL] Continuing without database. Endpoints needing DB will fail.");
       return; // do not run migrations
     }
@@ -282,6 +301,18 @@ app.post("/registration", async (req, res) => {
     const { email, username, password } = req.body || {};
     if (!email || !username || !password)
       return res.status(400).json({ message: "Missing fields" });
+    if (DB_OVER_HTTP) {
+      try {
+        const r = await atspaceCall('/registration', 'POST', { email, username, password });
+        const userId = Number(r.userId) || undefined;
+        const token = generateToken({ userId, username, email });
+        return res.json({ token, username, userId });
+      } catch (e) {
+        const msg = (e && e.message) || 'Registration failed';
+        const code = (e && e.status) || 500;
+        return res.status(code).json({ message: msg });
+      }
+    }
     if (!dbReady) return res.status(503).json({ message: "Database unavailable" });
     db.query(
       "SELECT id FROM users WHERE username = ? LIMIT 1",
@@ -318,6 +349,17 @@ app.post("/login", async (req, res) => {
   const { username, password } = req.body || {};
   if (!username || !password)
     return res.status(400).json({ message: "Missing fields" });
+  if (DB_OVER_HTTP) {
+    try {
+      const r = await atspaceCall('/login', 'POST', { username, password });
+      const token = generateToken({ userId: r.userId, username: r.username, email: r.email });
+      return res.json({ token, username: r.username, userId: r.userId });
+    } catch (e) {
+      const msg = (e && e.message) || 'Login failed';
+      const code = (e && e.status) || 500;
+      return res.status(code).json({ message: msg });
+    }
+  }
   if (!dbReady) return res.status(503).json({ message: "Database unavailable" });
   db.query(
     "SELECT * FROM users WHERE username = ? LIMIT 1",
@@ -334,8 +376,30 @@ app.post("/login", async (req, res) => {
   );
 });
 
-app.get("/me", requireAuth, (req, res) => {
+app.get("/me", requireAuth, async (req, res) => {
   const { username } = req.user;
+  if (DB_OVER_HTTP) {
+    try {
+      const r = await atspaceCall(`/me?username=${encodeURIComponent(username)}`, 'GET');
+      const u = r.user || {};
+      return res.json({
+        userId: u.id,
+        username: u.username,
+        email: u.email,
+        sc_balance: Number(u.sc_balance) || 0,
+        public_key: u.public_key || null,
+        xrp_address: u.xrp_address || null,
+        eth_address: u.eth_address || null,
+        xrp_balance: Number(u.xrp_balance) || 0,
+        eth_balance: Number(u.eth_balance) || 0,
+        xlm_balance: Number(u.xlm_balance) || 0,
+      });
+    } catch (e) {
+      const msg = (e && e.message) || 'DB error';
+      const code = (e && e.status) || 500;
+      return res.status(code).json({ message: msg });
+    }
+  }
   db.query(
     `SELECT id, username, email, sc_balance, public_key,
             xrp_address, eth_address, xrp_balance, eth_balance, xlm_balance
