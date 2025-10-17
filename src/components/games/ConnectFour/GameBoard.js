@@ -1,5 +1,6 @@
 /* eslint-disable no-console */
 import React, { useEffect, useRef, useState, useCallback } from 'react';
+import ReactDOM from 'react-dom';
 import 'bootstrap/dist/css/bootstrap.min.css';
 import 'bootstrap-icons/font/bootstrap-icons.css';
 import { Card, Row, Col, Button, Form, InputGroup, Badge } from "react-bootstrap";
@@ -8,6 +9,7 @@ import './GameBoard.css';
 import NavBar from "./../../NavBar";
 import QuickChat from '../common/QuickChat';
 import WaitingOverlay from '../common/WaitingOverlay';
+import ConnectFour3DView from '../ConnectFour3D/ConnectFour3DView';
 
 /* ============== LED helpers (War vibe) ============== */
 function LedFrame({ children, color='rgba(255,110,220,0.9)', speed=2, rounded='1rem', thickness=3, className='' }) {
@@ -179,7 +181,17 @@ function tokenStyleFor(color){const base=color||'#ef4444';const edge=darken(base
 function contrastText(hex){const{r,g,b}=hexToRgb(hex);const y=.2126*r+.7152*g+.0722*b;return y>140?'#0b1220':'#ffffff';}
 
 /* ========================= Avatars ========================= */
-const AVATAR_SET=[{id:'rocket',label:'Rocket',glyph:'🚀'},{id:'dragon',label:'Dragon',glyph:'🐉'},{id:'brain',label:'Brain',glyph:'🧠'},{id:'fox',label:'Fox',glyph:'🦊'},{id:'lion',label:'Lion',glyph:'🦁'},{id:'panda',label:'Panda',glyph:'🐼'},{id:'penguin',label:'Penguin',glyph:'🧑‍🚀'},{id:'alien',label:'Alien',glyph:'👾'}];
+const AVATAR_SET=[
+  {id:'rocket',label:'Rocket',glyph:'🚀'},
+  {id:'dragon',label:'Dragon',glyph:'🐉'},
+  {id:'brain',label:'Brain',glyph:'🧠'},
+  {id:'fox',label:'Fox',glyph:'🦊'},
+  {id:'lion',label:'Lion',glyph:'🦁'},
+  {id:'panda',label:'Panda',glyph:'🐼'},
+  {id:'penguin',label:'Penguin',glyph:'🧑‍🚀'},
+  {id:'alien',label:'Alien',glyph:'👾'},
+  {id:'astronaut',label:'Astronaut',glyph:'👨‍🚀'}
+];
 const findAvatar=(id)=>AVATAR_SET.find(a=>a.id===id)||AVATAR_SET[0];
 const Avatar=({id,size=22})=>{const a=findAvatar(id);return(
   <div
@@ -222,6 +234,8 @@ function PreGameSetup({
   selectedColor, setSelectedColor,
   stakeText, setStakeText,
   avatarId, setShowAvatarModal,
+  // New: character picker wiring
+  characterId, onPickCharacter,
   scBalance,
   onJoin,
   serverSaved,
@@ -241,6 +255,9 @@ function PreGameSetup({
       joinLabel="Join Game"
       onJoin={onJoin}
       joinDisabled={!username}
+      // Character selection
+      characterId={characterId}
+      onPickCharacter={onPickCharacter}
       avatarId={avatarId}
       avatarGlyph={findAvatar(avatarId).glyph}
       onOpenAvatarModal={() => setShowAvatarModal(true)}
@@ -332,12 +349,18 @@ export default function GameBoard({ embedded = false }) {
   const [avatarId, setAvatarId] = useState(
     localStorage.getItem('profileAvatar') || localStorage.getItem('cfAvatar') || 'rocket'
   );
+  // Character selection (Astronaut vs Alien)
+  const [characterId, setCharacterId] = useState(
+    localStorage.getItem('cfCharacter') || 'astronaut'
+  );
 
   const [colors, setColors] = useState({ 'Player 1': '#EF4444', 'Player 2': '#3B82F6' });
   const [myName, setMyName] = useState('You');
   const [oppName, setOppName] = useState('Opponent');
   const [myAvatarId, setMyAvatarId] = useState(avatarId);
   const [oppAvatarId, setOppAvatarId] = useState('alien');
+  // Opponent 3D character (astronaut/alien) is independent from emoji avatar
+  const [oppCharacterId, setOppCharacterId] = useState('alien');
 
   // SC wallet
   const [scBalance, setScBalance] = useState(0);
@@ -368,14 +391,16 @@ export default function GameBoard({ embedded = false }) {
   // chat
   const [chatFeed, setChatFeed] = useState([]);
   // quick chat top offset (below navbar)
-  const [qcTopOffset, setQcTopOffset] = useState(64);
+  // Sit a bit lower under the nav so it doesn't crowd top-right content
+  const [qcTopOffset, setQcTopOffset] = useState(140);
   useEffect(() => {
     const compute = () => {
       try {
         const nav = document.querySelector('.navbar');
         const h = nav ? nav.getBoundingClientRect().height : 56;
-        setQcTopOffset(Math.max(48, Math.round(h) + 8));
-      } catch { setQcTopOffset(64); }
+        // Add extra spacing beneath the nav (previously +24). Make it clearly lower.
+  setQcTopOffset(Math.max(160, Math.round(h) + 120));
+      } catch { setQcTopOffset(140); }
     };
     compute();
     window.addEventListener('resize', compute, { passive: true });
@@ -529,7 +554,7 @@ export default function GameBoard({ embedded = false }) {
       }
       if (data.type === 'savedQueued') {
         const youRole = data.you === 2 ? 'Player 2' : 'Player 1';
-        setPairedInfo({ you: data.you, usernames: data.usernames||{'Player 1':'P1','Player 2':'P2'}, colors: data.colors||{'Player 1':'#EF4444','Player 2':'#3B82F6'}, avatars: data.avatars||{'Player 1':'rocket','Player 2':'alien'}, stakes: pairedInfo?.stakes||{}, gameId: data.gameId||null, token: data.token||null });
+        setPairedInfo({ you: data.you, usernames: data.usernames||{'Player 1':'P1','Player 2':'P2'}, colors: data.colors||{'Player 1':'#EF4444','Player 2':'#3B82F6'}, avatars: data.avatars||{'Player 1':'rocket','Player 2':'alien'}, characters: data.characters || { 'Player 1': characterId || 'astronaut', 'Player 2': 'alien' }, stakes: pairedInfo?.stakes||{}, gameId: data.gameId||null, token: data.token||null });
         setShowMatch(true); setCountdown(null); setLobbyStatus('matching');
         pendingSavedJoinRef.current = null;
         joinIntentRef.current = null;
@@ -541,6 +566,7 @@ export default function GameBoard({ embedded = false }) {
           usernames: data.usernames || { 'Player 1':'Player 1','Player 2':'Player 2' },
           colors: data.colors || { 'Player 1':'#EF4444','Player 2':'#3B82F6' },
           avatars: data.avatars || { 'Player 1':'rocket','Player 2':'alien' },
+          characters: data.characters || { 'Player 1': characterId || 'astronaut', 'Player 2': 'alien' },
           stakes: data.stakes || (data.you===2 ? { 'Player 1':'—','Player 2':Number(stakeSC)||0 } : { 'Player 1':Number(stakeSC)||0,'Player 2':'—' }),
           roomId: data.roomId || data.gameId || null,
           gameId: data.gameId || null,
@@ -593,9 +619,17 @@ export default function GameBoard({ embedded = false }) {
           setColors({'Player 1':'#EF4444','Player 2':'#3B82F6'}); setSelectedColor(myColor); localStorage.setItem('cfColor', myColor);
         }
 
-        const av=data.avatars||{'Player 1':'rocket','Player 2':'alien'};
-        setMyAvatarId(av[role]||localStorage.getItem('cfAvatar')||'rocket');
-        setOppAvatarId(av[role==='Player 1'?'Player 2':'Player 1']||'alien');
+  const av=data.avatars||{'Player 1':'rocket','Player 2':'alien'};
+  setMyAvatarId(av[role]||localStorage.getItem('cfAvatar')||'rocket');
+  setOppAvatarId(av[role==='Player 1'?'Player 2':'Player 1']||'alien');
+
+  // Characters (3D model selection) — independent from emoji avatars
+  const ch = data.characters || (pairedInfo && pairedInfo.characters) || { 'Player 1': characterId || 'astronaut', 'Player 2': 'alien' };
+  const myChar = ch[role] || characterId || 'astronaut';
+  const oppChar = ch[role==='Player 1'?'Player 2':'Player 1'] || 'alien';
+  try { localStorage.setItem('cfCharacter', myChar); } catch {}
+  setCharacterId(myChar);
+  setOppCharacterId(oppChar);
 
   if (data.stakes) setPairedInfo(prev=>prev?{...prev,stakes:data.stakes, gameId: data.gameId||prev?.gameId, token: data.token||prev?.token}:{you:role==='Player 2'?2:1,stakes:data.stakes, gameId: data.gameId||null, token: data.token||null});
 
@@ -613,6 +647,38 @@ export default function GameBoard({ embedded = false }) {
           }
           pendingChatRef.current = null;
         }catch{}
+        return;
+      }
+  if (data.type === 'avatarUpdate' && data.side) {
+        // Cache the latest remote avatar target; always allow yaw-only updates so turning-in-place is visible
+        try {
+          const you = playerRoleRef.current || (pairedInfo?.you===2?'Player 2':'Player 1') || 'Player 1';
+          const remoteSide = (you === 'Player 1') ? 'Player 2' : 'Player 1';
+          if (data.side === remoteSide) {
+            const prev = (window.__CF_REMOTE_AVATAR__ || {});
+            const gx = Number(data.x);
+            const gz = Number(data.z);
+            const gts = Number(data.ts) || Date.now();
+            const gyaw = (typeof data.yaw === 'number') ? Number(data.yaw) : null;
+            const grun = !!data.run;
+            const gjump = !!data.isJumping;
+            const glift = (typeof data.lift === 'number' && Number.isFinite(data.lift)) ? Number(data.lift) : undefined;
+            const pts = Number(prev.ts) || 0;
+            // If we have valid x/z away from origin, update full pose
+            const nearZero = Number.isFinite(gx) && Number.isFinite(gz) && (Math.abs(gx) < 0.0005 && Math.abs(gz) < 0.0005);
+            if (Number.isFinite(gx) && Number.isFinite(gz) && !nearZero) {
+              if (gts >= pts) {
+                window.__CF_REMOTE_AVATAR__ = { x: gx, z: gz, ts: gts, side: data.side, yaw: gyaw, run: grun, isJumping: gjump, lift: glift };
+              }
+            } else if (typeof gyaw === 'number') {
+              // Yaw-only update: preserve last known x/z and just update yaw/time/run
+              const keepX = Number.isFinite(prev.x) ? Number(prev.x) : 0;
+              const keepZ = Number.isFinite(prev.z) ? Number(prev.z) : 0;
+              const nts = Math.max(gts, pts + 1); // ensure monotonic ts
+              window.__CF_REMOTE_AVATAR__ = { x: keepX, z: keepZ, ts: nts, side: data.side, yaw: gyaw, run: grun, isJumping: gjump, lift: glift };
+            }
+          }
+        } catch {}
         return;
       }
       if (data.type === 'playerLeft' && data.side) {
@@ -844,6 +910,7 @@ export default function GameBoard({ embedded = false }) {
     localStorage.setItem('username', name);
     localStorage.setItem('cfColor', selectedColor);
     localStorage.setItem('cfAvatar', avatarId);
+  localStorage.setItem('cfCharacter', characterId);
     localStorage.setItem('cfStake', String(stake));
     const ok = await lockStake(stake);
     if (!ok) return;
@@ -851,10 +918,28 @@ export default function GameBoard({ embedded = false }) {
     // Prevent auto-resume on the next socket open
     joinIntentRef.current = 'new';
     withOpenSocket((sock) => {
-      try { sock.send(JSON.stringify({ type:'joinGame', username:name, userId: userIdRef.current && userIdRef.current(), color:selectedColor, avatar:avatarId, stake })); } catch {}
+      try {
+        sock.send(JSON.stringify({ type:'joinGame', username:name, userId: userIdRef.current && userIdRef.current(), color:selectedColor, avatar:avatarId, character: characterId, stake }));
+      } catch {}
       setLobbyStatus('queued'); setShowMatch(true); setPairedInfo(null); setCountdown(null);
     });
   };
+
+  // Feed for 3D view: send my live avatar movement over the socket
+  const handleAvatarMove = useCallback((msg) => {
+    if (!msg || typeof msg.x !== 'number' || typeof msg.z !== 'number') return;
+    const yaw = typeof msg.yaw === 'number' ? msg.yaw : null;
+    const run = !!msg.run;
+    const isJumping = !!msg.isJumping;
+    const lift = (typeof msg.lift === 'number' && Number.isFinite(msg.lift)) ? Number(msg.lift) : undefined;
+    withOpenSocket((sock) => {
+      try {
+        const payload = { type: 'avatarMove', x: msg.x, z: msg.z, yaw, run, isJumping };
+        if (typeof lift === 'number') payload.lift = lift;
+        sock.send(JSON.stringify(payload));
+      } catch {}
+    });
+  }, []);
 
   const cancelMatchmaking = () => {
     pendingSavedJoinRef.current = null;
@@ -1064,6 +1149,8 @@ export default function GameBoard({ embedded = false }) {
                       setSelectedColor={setSelectedColor}
                       stakeText={stakeText}
                       setStakeText={setStakeText}
+                      characterId={characterId}
+                      onPickCharacter={setCharacterId}
                       avatarId={avatarId}
                       setShowAvatarModal={setShowAvatarModal}
                       scBalance={scBalance}
@@ -1082,69 +1169,45 @@ export default function GameBoard({ embedded = false }) {
             {/* Board area: render only after game starts */}
             {isGameStarted && (
               <div className="board-full-wrap">
-
-                {/* Winner / Loser Overlay */}
-                {showOverlay && (
-                  <div className="winlose-overlay">
-                    <div className="winlose-card position-relative">
-                      {isWinner && <div className="win-glow" aria-hidden="true" />}
-                      <h2 className="winlose-title mb-2">
-                        {isWinner ? (<><i className="bi bi-trophy-fill text-success" />You won!</>) : (<><i className="bi bi-emoji-frown-fill text-danger" />You lost!</>)}
-                      </h2>
-                      <div className="winlose-actions">
-                        <button className="btn btn-success btn-resp" onClick={handleRematch}><i className="bi bi-arrow-repeat me-1" /> Rematch ({rematchVotes}/2)</button>
-                        <button className="btn btn-outline-secondary btn-resp" onClick={handleLeave}><i className="bi bi-door-open me-1" /> Leave</button>
-                      </div>
-                    </div>
-                  </div>
-                )}
-
-                <div className="board-outer">
-                  <div className="board-wrap">
-                    <div className="cf-stage">
-                      <div className="board-frame">
-                        <div className="board-skin position-relative">
-                          <div className="board-glint"></div>
-
-                          {turnToast && <div className="turn-toast">{turnToast}</div>}
-
-                          {isGameStarted && (
-                            <div className="board position-relative">
-                              {Array.from({ length: COLUMNS }).map((_, colIndex) => (
-                                <div key={`arrow-${colIndex}`} className="col-arrow" style={{ left: `calc(${(colIndex + 0.5) / COLUMNS * 100}% )` }}>
-                                  <i className="bi bi-caret-down-fill"></i>
-                                </div>
-                              ))}
-
-                              {/* QuickChat removed from board skin; side panel used below */}
-                              {Array.from({ length: COLUMNS }).map((_, colIndex) => (
-                                <div key={colIndex} className="d-grid column-hover position-relative">
-                                  {Array.from({ length: ROWS }).map((_, rowIndex) => {
-                                    const cellVal = board[rowIndex][colIndex];
-                                    const isLast = lastMove && lastMove.row === rowIndex && lastMove.col === colIndex;
-                                    const dropRows = isLast ? (rowIndex + 1) : 0;
-                                    return (
-                                      <div key={`${colIndex}-${rowIndex}`} className="cell" onClick={() => handleCellClick(rowIndex, colIndex)}>
-                                        {cellVal && (
-                                          <div
-                                            className={`circle ${isLast ? 'token-drop' : ''}`}
-                                            style={{ ...(tokenStyleFor(colors[cellVal])), ...(isLast ? { '--drop-rows': dropRows } : {}) }}
-                                          />
-                                        )}
-                                      </div>
-                                    );
-                                  })}
-                                </div>
-                              ))}
+                {(() => {
+                  const fsNode = (
+                    <div className="c4-fs-shell">
+                      {/* Turn toast & Win/Loss overlay rendered inside portal so they are above Canvas */}
+                      {turnToast && <div className="turn-toast">{turnToast}</div>}
+                      {showOverlay && (
+                        <div className="winlose-overlay">
+                          <div className="winlose-card position-relative">
+                            {isWinner && <div className="win-glow" aria-hidden="true" />}
+                            <h2 className="winlose-title mb-2">
+                              {isWinner ? (<><i className="bi bi-trophy-fill text-success" />You won!</>) : (<><i className="bi bi-emoji-frown-fill text-danger" />You lost!</>)}
+                            </h2>
+                            <div className="winlose-actions">
+                              <button className="btn btn-success btn-resp" onClick={handleRematch}><i className="bi bi-arrow-repeat me-1" /> Rematch ({rematchVotes}/2)</button>
+                              <button className="btn btn-outline-secondary btn-resp" onClick={handleLeave}><i className="bi bi-door-open me-1" /> Leave</button>
                             </div>
-                          )}
+                          </div>
                         </div>
-
-                        {false && <div className="board-stand"></div>}
-                      </div>
+                      )}
+                      <ConnectFour3DView
+                        board={board}
+                        lastMove={lastMove}
+                        colors={colors}
+                        myCharacterId={characterId}
+                        oppCharacterId={oppCharacterId}
+                        flip180={playerRole === 'Player 2'}
+                        myName={myName}
+                        oppName={oppName}
+                        onAvatarMove={handleAvatarMove}
+                        onSelectColumn={(col)=>{
+                          const r = (()=>{ for(let rr=ROWS-1; rr>=0; rr--){ if(!board[rr][col]) return rr; } return null; })();
+                          if (r==null) return;
+                          handleCellClick(r, col);
+                        }}
+                      />
                     </div>
-                  </div>
-                </div>
+                  );
+                  try { return ReactDOM.createPortal(fsNode, document.body); } catch { return null; }
+                })()}
                 {/* Bottom actions below entire board */}
                 <div className="board-actions">
                   {isGameStarted && (
@@ -1181,7 +1244,6 @@ export default function GameBoard({ embedded = false }) {
                 messages={chatFeed}
                 youKey="you"
                 align="right"
-                offsetTop={(!embedded ? qcTopOffset : 8)}
                 canSend={wsReady}
               />
             )}
@@ -1340,7 +1402,7 @@ export default function GameBoard({ embedded = false }) {
   .board-wrap { padding:10px 10px 0; height:100%; display:flex; flex-direction:column; }
   .cf-stage { flex: 1; display:flex; align-items: stretch; }
   .topright-controls{ display:none }
-  .board-actions{ position:static; display:flex; justify-content:center; gap:.5rem; padding: .4rem 12px; margin-top: 8px; }
+  .board-actions{ position:fixed; left:0; right:0; bottom:0; z-index:210; display:flex; justify-content:center; gap:.5rem; padding: .6rem 12px; background: linear-gradient(180deg, rgba(2,6,14,.0) 0%, rgba(2,6,14,.55) 20%, rgba(2,6,14,.85) 100%); backdrop-filter: blur(4px); -webkit-backdrop-filter: blur(4px); }
 
         @media (max-width: 640px){
     .board-outer{ padding-right: 0; }

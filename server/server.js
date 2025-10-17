@@ -5,13 +5,20 @@ const path = require('path');
 const dotenv = require('dotenv');
 try {
   const root = path.join(__dirname, '..');
-  // Always try .env.production before .env so hosted environments can pick it up without NODE_ENV
-  const candidates = [
-    process.env.ENV_FILE,
-    '.env.production',
-    '.env'
-  ].filter(Boolean).map((p) => path.isAbsolute(p) ? p : path.join(root, p));
-  for (const f of candidates) {
+  const nodeEnv = String(process.env.NODE_ENV || '').toLowerCase();
+  const preferProd = nodeEnv === 'production';
+  const candidates = [];
+  if (process.env.ENV_FILE) candidates.push(process.env.ENV_FILE);
+  if (preferProd) {
+    candidates.push('.env.production', 'env.production', '.env');
+  } else {
+    // Development: prefer .env (local), never auto-load production env files
+    candidates.push('.env', '.env.development', 'env.development', 'env.local');
+  }
+  const files = candidates
+    .filter(Boolean)
+    .map((p) => (path.isAbsolute(p) ? p : path.join(root, p)));
+  for (const f of files) {
     if (fs.existsSync(f)) { dotenv.config({ path: f }); break; }
   }
 } catch { try { require('dotenv').config(); } catch {} }
@@ -70,7 +77,10 @@ const HOUSE_ETH_PRIVATE_KEY =
 const app = express();
 app.use(bodyParser.json());
 
-/** CORS: allow localhost, 127.0.0.1, and any private LAN IP (10/172.16-31/192.168). */
+/** CORS
+ * - Dev: allow localhost/LAN origins by default
+ * - Prod: if explicit allowed origins are configured, enforce them; otherwise skip CORS middleware to avoid blocking same-origin behind Apache
+ */
 const LAN_ORIGIN_REGEX =
   /^https?:\/\/(?:(?:localhost)|(?:127\.0\.0\.1)|(?:10(?:\.\d{1,3}){3})|(?:192\.168(?:\.\d{1,3}){2})|(?:172\.(?:1[6-9]|2\d|3[0-1])(?:\.\d{1,3}){2}))(?::\d+)?$/i;
 
@@ -78,21 +88,28 @@ const EXTRA_ORIGINS = (process.env.CORS_EXTRA_ORIGINS || "")
   .split(",")
   .map((s) => s.trim())
   .filter(Boolean);
+const PRIMARY_ORIGIN = (process.env.SITE_ORIGIN || process.env.PUBLIC_ORIGIN || process.env.APP_ORIGIN || "").trim();
+const ALLOWED_ORIGINS = Array.from(new Set([...(PRIMARY_ORIGIN ? [PRIMARY_ORIGIN] : []), ...EXTRA_ORIGINS]));
+const IS_DEV = String(process.env.NODE_ENV || '').toLowerCase() !== 'production';
 
-app.use(
-  cors({
-    origin: (origin, cb) => {
-      if (!origin) return cb(null, true); // allow curl/postman
-      if (LAN_ORIGIN_REGEX.test(origin)) return cb(null, true);
-      if (EXTRA_ORIGINS.includes(origin)) return cb(null, true);
-      return cb(new Error(`CORS blocked: ${origin}`));
-    },
-    methods: "GET,HEAD,PUT,PATCH,POST,DELETE,OPTIONS",
-    allowedHeaders: ["Content-Type", "Authorization"],
-    credentials: true,
-  })
-);
-app.options("*", cors());
+const ENABLE_CORS = IS_DEV || ALLOWED_ORIGINS.length > 0;
+if (ENABLE_CORS) {
+  app.use(
+    cors({
+      origin: (origin, cb) => {
+        if (!origin) return cb(null, true); // allow curl/postman
+        if (LAN_ORIGIN_REGEX.test(origin)) return cb(null, true);
+        if (ALLOWED_ORIGINS.includes(origin)) return cb(null, true);
+        if (IS_DEV) return cb(null, true);
+        return cb(new Error(`CORS blocked: ${origin}`));
+      },
+      methods: "GET,HEAD,PUT,PATCH,POST,DELETE,OPTIONS",
+      allowedHeaders: ["Content-Type", "Authorization"],
+      credentials: true,
+    })
+  );
+  app.options("*", cors());
+}
 
 // Health check
 app.get("/ping", (_req, res) => res.json({ ok: true }));
@@ -203,11 +220,29 @@ async function atspaceCall(path, method = 'GET', body) {
   return j;
 }
 let dbReady = false;
+// In development, prefer local MySQL unless explicitly configured to a non-local host
+try {
+  if (IS_DEV) {
+    const curHostRaw = String(process.env.MYSQL_HOST || '').trim();
+    const curHost = curHostRaw.toLowerCase();
+    const looksRemote = /atspace|pdb|\.atspace\.me|amazonaws|azure|googleapis|herokuapp|render\.com/.test(curHost);
+    if (!curHost || looksRemote) {
+      process.env.MYSQL_HOST = '127.0.0.1';
+      if (!process.env.MYSQL_USER) process.env.MYSQL_USER = 'root';
+      if (!process.env.MYSQL_PASSWORD) process.env.MYSQL_PASSWORD = 'qwqwqw';
+      if (!process.env.MYSQL_DB) process.env.MYSQL_DB = 'games';
+      if (!process.env.MYSQL_PORT) process.env.MYSQL_PORT = '3306';
+      process.env.MYSQL_SSL = '0';
+      console.log('[DB] Dev override -> using localhost credentials');
+    }
+  }
+} catch {}
+const defaultDbName = (process.env.NODE_ENV === 'development') ? 'games' : 'NeonGames';
 const dbConfig = {
   host: process.env.MYSQL_HOST || "127.0.0.1",
   user: process.env.MYSQL_USER || "root",
   password: process.env.MYSQL_PASSWORD || "",
-  database: process.env.MYSQL_DB || "game",
+  database: process.env.MYSQL_DB || defaultDbName,
   port: Number(process.env.MYSQL_PORT) || 3306,
   connectionLimit: 10,
   // Optional TLS for hosted MySQL (set MYSQL_SSL=1 and optionally MYSQL_SSL_REJECT_UNAUTH=0)
@@ -219,7 +254,8 @@ const dbConfig = {
   })(),
 };
 console.log(`[DB] Using host ${dbConfig.host}:${dbConfig.port} ssl=${!!dbConfig.ssl}`);
-const db = mysql.createPool(dbConfig);
+let db = mysql.createPool(dbConfig);
+let attemptedLocalFallback = false;
 // DB health endpoint available whether or not DB is ready
 app.get('/health/db', (_req, res) => {
   if (!dbReady) return res.status(503).json({ ok: false, error: 'database unavailable' });
@@ -229,15 +265,26 @@ app.get('/health/db', (_req, res) => {
   });
 });
 
-db.getConnection((err, conn) => {
-  if (err) {
-    console.error("DB connect failed:", err);
-    if (DB_OPTIONAL || DB_OVER_HTTP) {
-      console.warn("[DB_OPTIONAL] Continuing without database. Endpoints needing DB will fail.");
-      return; // do not run migrations
-    }
-    return; // leave dbReady=false; health/db returns 503
-  }
+function tryLocalFallback(){
+  if (attemptedLocalFallback) return false;
+  attemptedLocalFallback = true;
+  const localCfg = {
+    host: '127.0.0.1',
+    user: process.env.MYSQL_USER || 'root',
+    password: (process.env.MYSQL_PASSWORD !== undefined ? process.env.MYSQL_PASSWORD : 'qwqwqw'),
+    database: process.env.MYSQL_DB || (IS_DEV ? 'games' : 'NeonGames'),
+    port: 3306,
+    connectionLimit: 10,
+    ssl: undefined,
+  };
+  console.warn(`[DB] Falling back to local MySQL ${localCfg.host}:${localCfg.port}`);
+  try { db.end && db.end(()=>{}); } catch {}
+  db = mysql.createPool(localCfg);
+  console.log(`[DB] Using host ${localCfg.host}:${localCfg.port} ssl=${!!localCfg.ssl}`);
+  return true;
+}
+
+function onDbConnected(conn){
   dbReady = true;
   console.log("Connected to the database");
   conn.release();
@@ -251,26 +298,52 @@ db.getConnection((err, conn) => {
     if (q && typeof q.on === 'function') q.on('error', () => {});
   };
 
+  // Ensure core tables exist
+  safeQuery(
+    `CREATE TABLE IF NOT EXISTS users (
+      id INT NOT NULL AUTO_INCREMENT,
+      email VARCHAR(255) NOT NULL,
+      username VARCHAR(64) NOT NULL UNIQUE,
+      password VARCHAR(255) NOT NULL,
+      sc_balance DECIMAL(32,8) NOT NULL DEFAULT 0,
+      public_key VARCHAR(64) NULL,
+      secret_key VARCHAR(64) NULL,
+      xrp_address VARCHAR(64) NULL,
+      xrp_secret VARCHAR(128) NULL,
+      eth_address VARCHAR(64) NULL,
+      xrp_balance DECIMAL(32,8) NOT NULL DEFAULT 0,
+      eth_balance DECIMAL(32,8) NOT NULL DEFAULT 0,
+      xlm_balance DECIMAL(32,8) NOT NULL DEFAULT 0,
+      PRIMARY KEY (id),
+      KEY ix_username (username)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`,
+    (e) => { if (e) console.warn("CREATE users failed:", e && e.message); }
+  );
   safeQuery(
     "CREATE TABLE IF NOT EXISTS jackpot_sc (id INT PRIMARY KEY, pool_sc DECIMAL(32,8) NOT NULL DEFAULT 0)",
     () => safeQuery("INSERT IGNORE INTO jackpot_sc (id, pool_sc) VALUES (1, 0)")
   );
+  // Older MySQL/MariaDB may not support "ADD COLUMN IF NOT EXISTS"; use plain ADD and ignore duplicate errors
   safeQuery(
-    "ALTER TABLE users ADD COLUMN IF NOT EXISTS xlm_balance DECIMAL(32,8) NOT NULL DEFAULT 0",
+    "ALTER TABLE users ADD COLUMN xlm_balance DECIMAL(32,8) NOT NULL DEFAULT 0",
     (e) => {
-      if (e && !/Duplicate column/i.test(String(e && e.message)))
-        console.warn("ALTER users add xlm_balance failed:", e && e.message);
+      const msg = String(e && e.message);
+      if (e && !/Duplicate column|ER_DUP_FIELDNAME/i.test(msg)) {
+        console.warn("ALTER users add xlm_balance failed:", msg);
+      }
     }
   );
   safeQuery(
-    "ALTER TABLE users ADD COLUMN IF NOT EXISTS sc_balance DECIMAL(32,8) NOT NULL DEFAULT 0",
+    "ALTER TABLE users ADD COLUMN sc_balance DECIMAL(32,8) NOT NULL DEFAULT 0",
     (e) => {
-      if (e && !/Duplicate column/i.test(String(e && e.message)))
-        console.warn("ALTER users add sc_balance failed:", e && e.message);
-      else
+      const msg = String(e && e.message);
+      if (e && !/Duplicate column|ER_DUP_FIELDNAME/i.test(msg)) {
+        console.warn("ALTER users add sc_balance failed:", msg);
+      } else {
         safeQuery(
           "UPDATE users SET sc_balance = coin_balance WHERE (sc_balance = 0 OR sc_balance IS NULL) AND coin_balance IS NOT NULL"
         );
+      }
     }
   );
   // Simple key-value app config for global settings
@@ -278,6 +351,32 @@ db.getConnection((err, conn) => {
     "CREATE TABLE IF NOT EXISTS app_config (k VARCHAR(64) PRIMARY KEY, v TEXT NOT NULL)",
     (e) => { if (e) console.warn("CREATE app_config failed:", e && e.message); }
   );
+}
+
+db.getConnection((err, conn) => {
+  if (err) {
+    console.error("DB connect failed:", err);
+    if (tryLocalFallback()) {
+      db.getConnection((err2, conn2) => {
+        if (err2) {
+          console.error("Local DB fallback failed:", err2);
+          if (DB_OPTIONAL || DB_OVER_HTTP) {
+            console.warn("[DB_OPTIONAL] Continuing without database. Endpoints needing DB will fail.");
+            return;
+          }
+          return;
+        }
+        onDbConnected(conn2);
+      });
+      return;
+    }
+    if (DB_OPTIONAL || DB_OVER_HTTP) {
+      console.warn("[DB_OPTIONAL] Continuing without database. Endpoints needing DB will fail.");
+      return;
+    }
+    return; // leave dbReady=false; health/db returns 503
+  }
+  onDbConnected(conn);
 });
 
 // Note: schema migrations are executed after a successful DB connection using safeQuery above.

@@ -1,0 +1,11 @@
+Model Information:
+* title:	BONECA AMBALABU
+* source:	https://sketchfab.com/3d-models/boneca-ambalabu-30ac2af4ae5648f6bd04c32aaaffaddc
+* author:	Aizen (https://sketchfab.com/Aizenx.)
+
+Model License:
+* license type:	CC-BY-4.0 (http://creativecommons.org/licenses/by/4.0/)
+* requirements:	Author must be credited. Commercial use is allowed.
+
+If you use this 3D model in your project be sure to copy paste this credit wherever you share it:
+This work is based on "BONECA AMBALABU" (https://sketchfab.com/3d-models/boneca-ambalabu-30ac2af4ae5648f6bd04c32aaaffaddc) by Aizen (https://sketchfab.com/Aizenx.) licensed under CC-BY-4.0 (http://creativecommons.org/licenses/by/4.0/)

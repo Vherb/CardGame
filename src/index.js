@@ -23,6 +23,16 @@ root.render(
     </React.StrictMode>
 );
 
+// Register service worker for PWA install + update experience
+try {
+    if ('serviceWorker' in navigator) {
+        window.addEventListener('load', () => {
+            const swUrl = `${process.env.PUBLIC_URL || ''}/sw.js`;
+            navigator.serviceWorker.register(swUrl).catch(() => {});
+        });
+    }
+} catch {}
+
 // If you want to start measuring performance in your app, pass a function
 // to log results (for example: reportWebVitals(console.log))
 // or send to an analytics endpoint. Learn more: https://bit.ly/CRA-vitals

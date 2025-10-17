@@ -1,5 +1,5 @@
 /* eslint-disable no-console */
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import 'bootstrap/dist/css/bootstrap.min.css';
 import 'bootstrap-icons/font/bootstrap-icons.css';
 import { Button } from 'react-bootstrap';
@@ -35,6 +35,8 @@ function loadCheckerPiece() {
   return CHECKER_PIECE_PROMISE;
 }
 
+// (Opponent avatar and table were removed from Checkers per request.)
+
 // API + wallet helpers (parity with Chess/C4)
 const API = (()=>{ const { protocol, hostname } = window.location; const envHost=(process.env.REACT_APP_SERVER_HOST||'').trim(); const winHost=(window.SERVER_HOST?String(window.SERVER_HOST).trim():''); let lsHost=''; try{ lsHost=(localStorage.getItem('serverHost')||'').trim(); }catch{} const host=envHost||winHost||lsHost||hostname; return process.env.REACT_APP_API_BASE || `${protocol}//${host}:3002`; })();
 function authFetch(path, options = {}) { const token = localStorage.getItem('token') || ''; return fetch(`${API}${path}`, { ...options, headers: { 'Content-Type': 'application/json', ...(options.headers||{}), ...(token?{ Authorization:`Bearer ${token}`}:{}), }, }); }
@@ -49,6 +51,7 @@ const getWsUrl = () => {
 };
 
 // Default piece positioning/scaling for Checkers pieces
+// Default offsets/scales: restore prior defaults; desktop uses this baseline, mobile applies an extra downward tweak
 const CHECKER_PIECE_DEFAULTS = Object.freeze({ yOffset: -0.505, yScale: 1, zOffset: 0.12, xzScale: 0.75 });
 
 // Minimal checkers client helpers
@@ -72,29 +75,60 @@ function validMoves(board, r, c, role){
   return res;
 }
 
-function AnimatedPiece({ to=[0,0,0], from, children, speed=10, lift=0.10, onSettled }){
+function AnimatedPiece({ to=[0,0,0], from, children, speed=10, lift=0, onSettled }){
   const ref = useRef();
   const prevTo = useRef([NaN,NaN,NaN]);
+  const prevFrom = useRef([NaN,NaN,NaN]);
   const startRef = useRef([0,0,0]);
   const endRef = useRef([0,0,0]);
   const totalXZRef = useRef(0.000001);
+  const initializedRef = useRef(false);
+  const hadFromRef = useRef(false);
   const target = to;
   const nearlyEq = (a,b,eps=1e-4)=> Math.abs(a[0]-b[0])<eps && Math.abs(a[1]-b[1])<eps && Math.abs(a[2]-b[2])<eps;
   const distXZ = (a,b)=>{ const dx=(a[0]-b[0]); const dz=(a[2]-b[2]); return Math.sqrt(dx*dx+dz*dz); };
-  useEffect(()=>{
+  useLayoutEffect(()=>{
     const f = from; const t = to;
     const toChanged = !nearlyEq(prevTo.current, t);
-    if(ref.current && (toChanged || f)){
-      if(f) ref.current.position.set(f[0], f[1], f[2]);
-      const start = f ? [f[0],f[1],f[2]] : [ref.current.position.x, ref.current.position.y, ref.current.position.z];
+    const hadPrevFrom = Number.isFinite(prevFrom.current[0]);
+    const fromChanged = !!(f && (!hadPrevFrom || !nearlyEq(prevFrom.current, f)));
+    if(ref.current && (toChanged || fromChanged)){
+      // If we've already snapped to destination and a late 'from' arrives without 'to' changing, ignore it
+      if (!toChanged && fromChanged && initializedRef.current && !hadPrevFrom) {
+        prevTo.current = [...t];
+        hadFromRef.current = false;
+        // do not set prevFrom here; keep ignoring this stale 'from'
+        return;
+      }
+      // If from and to are essentially the same, snap and do nothing
+      if (f && nearlyEq(f, t)) {
+        ref.current.position.set(t[0], t[1], t[2]);
+        startRef.current = [t[0], t[1], t[2]];
+        endRef.current = [t[0], t[1], t[2]];
+        totalXZRef.current = 0.000001;
+        prevTo.current = [...t];
+        prevFrom.current = [...f];
+        initializedRef.current = true;
+        return;
+      }
+      // On first mount or when move changes, set the starting position synchronously before paint to avoid flicker
+      if(fromChanged){
+        ref.current.position.set(f[0], f[1], f[2]);
+      } else if (!initializedRef.current) {
+        // First render with no 'from': snap to target
+        ref.current.position.set(t[0], t[1], t[2]);
+      }
+      const start = (fromChanged && f) ? [f[0],f[1],f[2]] : [ref.current.position.x, ref.current.position.y, ref.current.position.z];
       const end = [t[0], t[1], t[2]];
       startRef.current = start; endRef.current = end;
       totalXZRef.current = Math.max(0.000001, distXZ(start, end));
       prevTo.current = [...t];
+      if (f) { prevFrom.current = [...f]; hadFromRef.current = true; } else { hadFromRef.current = false; }
+      initializedRef.current = true;
     }
-  }, [from, to]);
+  }, [from?.[0], from?.[1], from?.[2], to?.[0], to?.[1], to?.[2]]);
   useFrame((_, dt)=>{
-    if(!ref.current) return;
+    if(!ref.current || !initializedRef.current) return;
     const p = ref.current.position;
     const smooth = Math.max(1, Number(speed)||10);
     p.x = THREE.MathUtils.damp(p.x, target[0], smooth, dt);
@@ -105,14 +139,17 @@ function AnimatedPiece({ to=[0,0,0], from, children, speed=10, lift=0.10, onSett
     const lin = THREE.MathUtils.clamp(1 - (remain/total), 0, 1);
     const prog = lin*lin*(3-2*lin);
     const yBase = THREE.MathUtils.lerp(start[1], end[1], prog);
-    const bump = lift>0 ? (lift * 4 * prog * (1-prog)) : 0;
-    p.y = yBase + bump;
+  const bump = lift>0 ? (lift * 4 * prog * (1-prog)) : 0;
+  p.y = yBase + bump;
+  // Guard against tiny positive drift around 0 when target is flush with the board
+  if (Math.abs(target[1]) < 1e-6 && Math.abs(p.y) < 1e-4) p.y = 0;
     if(Math.abs(target[0]-p.x)<1e-3 && Math.abs(target[1]-p.y)<1e-3 && Math.abs(target[2]-p.z)<1e-3){
       p.set(target[0], target[1], target[2]);
       onSettled && onSettled();
     }
   });
-  return <group ref={ref} frustumCulled={false}>{children}</group>;
+  // Set initial position directly to avoid any first-frame hover on slower devices; layout effect will override if 'from' is provided
+  return <group ref={ref} position={[to[0], to[1], to[2]]} frustumCulled={false}>{children}</group>;
 }
 
 function CheckerPiece({ color = '#ef4444', king = false, selected = false, userYScale = 1, userXZScale = 1, userZOffset = 0 }){
@@ -120,6 +157,7 @@ function CheckerPiece({ color = '#ef4444', king = false, selected = false, userY
   const [pieceHeight, setPieceHeight] = React.useState(0.12);
   const baseScaleRef = React.useRef(new THREE.Vector3(1,1,1));
   const pulseRef = React.useRef(null);
+  const isMobile = React.useMemo(()=>{ try{ return typeof window!== 'undefined' && (window.matchMedia('(pointer:coarse)').matches || window.matchMedia('(max-width: 640px)').matches); }catch{return false;} },[]);
 
   // Load and cache the GLB; clone for this instance
   React.useEffect(() => {
@@ -315,8 +353,8 @@ function CheckerPiece({ color = '#ef4444', king = false, selected = false, userY
 
   return (
     <group>
-      {/* Center the model at tile center; model is already scaled to tile */}
-  <group position={[0, 0.05, 0]}>
+      {/* Center the model at tile center; model is already aligned to base y=0 */}
+      <group position={[0, 0, 0]}>
         {/* eslint-disable-next-line react/no-unknown-property */}
         <primitive object={model} />
       </group>
@@ -344,6 +382,8 @@ function Board3D({ board, lastMove, myRole, onCellClick, selected, moves, colors
   const minAz = -azimuthRange;
   const maxAz =  azimuthRange;
   const isMobile = isNarrow;
+  const SHOW_OPPONENT = false;
+  const SHOW_TABLE = false;
 
   // Chess-like neon constants
   const NEON_BG_OUTER = '#030712';
@@ -709,13 +749,14 @@ function Board3D({ board, lastMove, myRole, onCellClick, selected, moves, colors
               // Swap piece colors between players
               const col = cell.owner === 'Player 1' ? (colors?.['Player 2'] || '#3b82f6') : (colors?.['Player 1'] || '#ef4444');
               const isMovedDest = !!(lastMove && lastMove.r2===r && lastMove.c2===c);
-              const yBase = 0.08 + (Number(pieceYOffset)||0);
+              // Use the same starting baseline for both PC and phone so mobiles don't float at load
+              const yBase = (0.13 + (Number(pieceYOffset)||0));
               const zShift = Number(pieceZOffset)||0;
               const fromPos = isMovedDest ? [lastMove.c*tile, yBase, lastMove.r*tile + zShift] : undefined;
               const toPos = [x, yBase, z + zShift];
               return (
                 <group key={`p-${r}-${c}`} onClick={(e)=>{ e.stopPropagation(); onCellClick(r,c); }}>
-                  <AnimatedPiece to={toPos} from={fromPos} speed={isMobile?14:10} lift={isMobile?0.06:0.10}>
+                  <AnimatedPiece to={toPos} from={fromPos} speed={isMobile?14:10} lift={0}>
                     <CheckerPiece
                       king={!!cell.king}
                       color={col}
@@ -729,6 +770,8 @@ function Board3D({ board, lastMove, myRole, onCellClick, selected, moves, colors
               );
             }))}
           </React.Suspense>
+
+          {/* Opponent avatar and table intentionally not rendered in Checkers */}
         </group>
       </group>
     </Canvas>
@@ -1081,7 +1124,7 @@ export default function CheckersScreen(){
                         ? { 'Player 1': '#ef4444', 'Player 2': desiredColor }
                         : { 'Player 1': desiredColor, 'Player 2': '#3b82f6' });
                   return (
-              <Board3D
+      <Board3D
                 board={board}
                 lastMove={lastMove}
                 myRole={playerRole}
@@ -1092,7 +1135,7 @@ export default function CheckersScreen(){
                     pieceYOffset={pieceYOffset}
                     pieceYScale={pieceYScale}
                     pieceZOffset={pieceZOffset}
-                    pieceXZScale={pieceXZScale}
+        pieceXZScale={pieceXZScale}
               />
                   );
                 })()}

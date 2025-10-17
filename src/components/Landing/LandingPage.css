@@ -17,11 +17,24 @@
 .hero-float--b{ right: 12%; top: 28%; background: radial-gradient(circle at 40% 60%, rgba(99,102,241,.35), rgba(0,0,0,0) 70%); }
 .led-rail{ position:relative; width: 100%; height: 10px; margin: 20px 0; overflow: visible; }
 .led-rail::before{ content:""; position:absolute; inset:0; border-radius:999px; background:
-	linear-gradient(90deg, rgba(255,255,255,0), rgba(255,255,255,.12) 16%, var(--led-color, rgba(255,110,220,.85)) 46%, rgba(255,255,255,.12) 64%, rgba(255,255,255,0));
-	filter: blur(5px) saturate(1.08); animation: rail-move 6s linear infinite; }
+	radial-gradient(60% 120% at 50% 50%,
+	  var(--led-color, rgba(255,110,220,.90)) 0%,
+	  rgba(255,255,255,.18) 24%,
+	  rgba(255,255,255,.10) 40%,
+	  rgba(255,255,255,0) 60%
+	);
+	filter: blur(10px) saturate(1.08);
+	opacity: .55;
+	animation: rail-breathe 6s ease-in-out infinite; }
 .led-rail--top{ margin-top: 0; }
 .led-rail--bottom{ margin-bottom: 0; }
-@keyframes rail-move{ 0%{ background-position: 0% 50%; } 100%{ background-position: 200% 50%; } }
+/* Bottom rail breathes out-of-phase */
+.led-rail--bottom::before{ animation-delay: -3s; }
+@keyframes rail-breathe{
+	0%   { opacity: .38; filter: blur(8px) saturate(1.04); }
+	50%  { opacity: .95; filter: blur(12px) saturate(1.16); }
+	100% { opacity: .38; filter: blur(8px) saturate(1.04); }
+}
 .scroll-ind { margin-top: 36px; height: 28px; display: grid; place-items: center; opacity: .8; }
 .scroll-ind span{ width: 30px; height: 14px; border: 2px solid rgba(255,255,255,.4); border-top: none; border-radius: 0 0 12px 12px; position: relative; }
 .scroll-ind span::after{ content:""; position:absolute; top:-8px; left:50%; transform:translateX(-50%); width:6px; height:6px; border-radius:50%; background: rgba(255,255,255,.7); animation: bounce 1.6s ease-in-out infinite; }

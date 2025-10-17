@@ -1301,6 +1301,7 @@ export default function Game() {
                   <BsButton
                     className="w-100"
                     variant="primary"
+                    style={{ fontSize: "0.85rem" }}
                     onClick={startGame}
                     disabled={!roundOver || isRolling || (Number(bet) || 0) <= 0 || !authed}
                   >

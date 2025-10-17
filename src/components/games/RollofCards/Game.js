@@ -1356,6 +1356,7 @@ export default function Game() {
           paddingRight: 18,
           boxShadow: "0 8px 30px rgba(150,100,230,0.35), 0 0 18px rgba(150,100,230,0.12)",
           borderRadius: 8,
+          fontSize: "0.8rem"
         }}
         onClick={startGame}
         disabled={!roundOver || isRolling || (Number(bet) || 0) <= 0 || !authed || isRebetting}
@@ -1408,6 +1409,7 @@ export default function Game() {
     <BsButton
       className="start-game-btn-mobile w-100"
       variant="primary"
+      style={{ fontSize: "0.85rem" }}
       onClick={startGame}
       disabled={!roundOver || isRolling || (Number(bet) || 0) <= 0 || !authed || isRebetting}
     >

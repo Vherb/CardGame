@@ -5,6 +5,7 @@ import confetti from 'canvas-confetti';
 import NavBar from "../NavBar";
 import './LandingPage.css';
 import arrowImg from '../../assets/arrow.png';
+import { ENABLE_WAR } from '../../featureFlags';
 
 export default function LandingPage(){
   const rootRef = useRef(null);
@@ -40,7 +41,7 @@ export default function LandingPage(){
           <h1 className="display neon-title">Neon Games</h1>
           <p className="subtitle">Arcade vibes. Modern multiplayer classics.</p>
           <div className="cta-row">
-            <Link className="btn btn-primary btn-lg" to="/roll-of-cards">Play Roll of Cards</Link>
+            <Link className="btn btn-primary btn-lg" to="/roll-of-cards">Play In-Between</Link>
             <a
               className="btn btn-outline-light btn-lg"
               href="#games"
@@ -83,12 +84,14 @@ export default function LandingPage(){
         <div className="container-wide">
           <h2 className="section-title">Featured Games</h2>
           <div className="grid">
-            <GameCard title="Roll of Cards" to="/roll-of-cards" emoji="🃏🎲" blurb="Cards meet dice—bet and win with streak and spread bonuses." />
+            <GameCard title="In-Between" to="/roll-of-cards" emoji="🃏🎲" blurb="Cards meet dice—bet and win with streak and spread bonuses." />
             <GameCard title="Connect Four" to="/connect-four" emoji="⦿⦿" blurb="Drop discs and connect four in a row." />
             <GameCard title="Checkers" to="/checkers" emoji="⛀⛂" blurb="Classic jumps to victory." />
             <GameCard title="Chess" to="/chess" emoji="♟︎♞" blurb="Strategize and checkmate." />
             <GameCard title="3D Chess" to="/3d-chess" emoji="♜" blurb="Stacked boards for galaxy-brain plays." />
-            <GameCard title="War" to="/war" emoji="🂠" blurb="High card takes the pot." />
+            {ENABLE_WAR && (
+              <GameCard title="War" to="/war" emoji="🂠" blurb="High card takes the pot." />
+            )}
           </div>
         </div>
       </section>
@@ -119,7 +122,7 @@ export default function LandingPage(){
       <section className="section final-cta reveal">
         <div className="container-narrow text-center">
           <h3 className="mb-3">Ready to play?</h3>
-          <Link className="btn btn-primary btn-lg" to="/roll-of-cards">Jump into Roll of Cards</Link>
+          <Link className="btn btn-primary btn-lg" to="/roll-of-cards">Jump into In-Between</Link>
         </div>
       </section>
     </div>

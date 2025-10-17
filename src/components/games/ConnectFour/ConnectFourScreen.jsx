@@ -33,7 +33,7 @@ export default function ConnectFourScreen() {
       <div className="nav-spacer" aria-hidden="true" />
 
       {/* Scrollable content area */}
-      <main className="app-content" style={{ position:'relative' }}>
+      <main className="app-content app-content--full" style={{ position:'relative' }}>
         {!authed && (<LoginOverlay />)}
         {/* Embedded mode: GameBoard hides its own header/spacer */}
         <GameBoard embedded />

@@ -1,5 +1,6 @@
 /* eslint-disable react/jsx-pascal-case */
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { ENABLE_WAR, ENABLE_BATTLESHIP } from "../featureFlags";
 import { Navbar, Nav, Container, Button, NavDropdown, Spinner, Modal, Form } from "react-bootstrap";
 import "bootstrap/dist/css/bootstrap.min.css";
 import "bootstrap-icons/font/bootstrap-icons.css";
@@ -195,37 +196,101 @@ export default function NavBar() {
   // Wallet modal state
   const [showWallet, setShowWallet] = useState(false);
 
+  // PWA install prompt
+  const [deferredPrompt, setDeferredPrompt] = useState(null);
+  const [canInstall, setCanInstall] = useState(false);
+  const [showIosInstall, setShowIosInstall] = useState(false);
+  useEffect(() => {
+    const onBeforeInstall = (e) => {
+      e.preventDefault();
+      setDeferredPrompt(e);
+      setCanInstall(true);
+    };
+    window.addEventListener('beforeinstallprompt', onBeforeInstall);
+    return () => window.removeEventListener('beforeinstallprompt', onBeforeInstall);
+  }, []);
+  const doInstall = React.useCallback(async () => {
+    try {
+      const ev = deferredPrompt;
+      if (!ev) return;
+      setCanInstall(false);
+      await ev.prompt();
+      await ev.userChoice; // { outcome: 'accepted' | 'dismissed' }
+      setDeferredPrompt(null);
+    } catch {}
+  }, [deferredPrompt]);
+
+  // Mobile-only Install visibility + iOS fallback
+  const isStandalone = (typeof window !== 'undefined') && (
+    window.matchMedia('(display-mode: standalone)').matches ||
+    // iOS Safari
+    (window.navigator && window.navigator.standalone)
+  );
+  const ua = (typeof navigator !== 'undefined' ? navigator.userAgent : '').toLowerCase();
+  const isIOS = /iphone|ipad|ipod/.test(ua);
+  const isMobile = /mobi|android|iphone|ipad|ipod/.test(ua);
+  const showInstallBtn = isMobile && !isStandalone && (canInstall || isIOS);
+
+  // Global UI event listeners from MobileBottomNav
+  useEffect(() => {
+    const openWallet = () => setShowWallet(true);
+    const openProfile = () => setShowProfile(true);
+    const triggerInstall = () => {
+      if (isIOS) setShowIosInstall(true);
+      else doInstall();
+    };
+    window.addEventListener('ui:wallet:open', openWallet);
+    window.addEventListener('ui:profile:open', openProfile);
+    window.addEventListener('ui:install:open', triggerInstall);
+    return () => {
+      window.removeEventListener('ui:wallet:open', openWallet);
+      window.removeEventListener('ui:profile:open', openProfile);
+      window.removeEventListener('ui:install:open', triggerInstall);
+    };
+  }, [isIOS, doInstall]);
+
   return (
     <>
-    <Navbar ref={navRef} className="app-navbar shadow-sm" bg="dark" variant="dark" fixed="top" expand="md">
+    <Navbar ref={navRef} className="app-navbar shadow-sm" bg="dark" variant="dark" fixed="top">
       <Container fluid>
-        {/* Brand: Neon Games (match footer branding) */}
-        <Navbar.Brand href="/" className="brand">
-          <span className="brand-emblem brand-mark" aria-hidden="true">⚡</span>
-          <strong className="brand-name">Neon Games</strong>
-        </Navbar.Brand>
-
-        <Navbar.Toggle aria-controls="main-nav">
-          <i className="bi bi-list" />
-        </Navbar.Toggle>
-
-        <Navbar.Collapse id="main-nav">
-          <Nav className="me-auto">
-            <Nav.Link href="/roll-of-cards">Roll of Cards</Nav.Link>
-            <Nav.Link href="/connect-four">Connect 4</Nav.Link>
-            <Nav.Link href="/checkers">Checkers</Nav.Link>
-            <Nav.Link href="/chess">Chess</Nav.Link>
-            <Nav.Link href="/3d-chess">3D Chess</Nav.Link>
-            <Nav.Link href="/war">War</Nav.Link>
-            <Nav.Link href="/battleship">Battleship</Nav.Link>
-          </Nav>
-
-          {/* Right HUD */}
-          <div className="hud-right d-flex align-items-center gap-2">
-            {/* Theme toggle */}
-            <Button variant={theme==='day'?'outline-dark':'outline-light'} size="sm" onClick={()=>setTheme(theme==='day'?'neon':'day')} title={theme==='day'?'Switch to Neon':'Switch to Day'}>
-              {theme==='day' ? <i className="bi bi-moon-stars" /> : <i className="bi bi-sun" />}
+        {/* Left side: on phones show Install if available; brand on desktop */}
+        <div className="d-flex align-items-center gap-2">
+          {showInstallBtn && (
+            <Button
+              variant="outline-success"
+              size="sm"
+              className="d-inline-flex d-md-none"
+              onClick={() => (isIOS ? setShowIosInstall(true) : doInstall())}
+              title="Install app"
+            >
+              <i className="bi bi-download" />
             </Button>
+          )}
+          <Navbar.Brand href="/" className="brand d-none d-md-flex">
+            <span className="brand-emblem brand-mark" aria-hidden="true">⚡</span>
+            <strong className="brand-name">Neon Games</strong>
+          </Navbar.Brand>
+        </div>
+
+        {/* Desktop links only */}
+        <Nav className="me-auto d-none d-md-flex">
+          <Nav.Link href="/roll-of-cards">In-Between</Nav.Link>
+          <Nav.Link href="/connect-four">Connect 4</Nav.Link>
+          <Nav.Link href="/checkers">Checkers</Nav.Link>
+          <Nav.Link href="/chess">Chess</Nav.Link>
+          <Nav.Link href="/3d-chess">3D Chess</Nav.Link>
+          {ENABLE_WAR && <Nav.Link href="/war">War</Nav.Link>}
+          {ENABLE_BATTLESHIP && <Nav.Link href="/battleship">Battleship</Nav.Link>}
+        </Nav>
+
+        {/* Right HUD: always visible, minimal on phones */}
+        <div className="hud-right d-flex align-items-center gap-2 ms-auto">
+            {/* Theme toggle (temporarily hidden while WIP) */}
+            {false && (
+              <Button variant={theme==='day'?'outline-dark':'outline-light'} size="sm" onClick={()=>setTheme(theme==='day'?'neon':'day')} title={theme==='day'?'Switch to Neon':'Switch to Day'}>
+                {theme==='day' ? <i className="bi bi-moon-stars" /> : <i className="bi bi-sun" />}
+              </Button>
+            )}
             {/* Balance (only when authed and loaded) */}
             {showAuthedUI && (
               <div className="balance-badge">
@@ -274,8 +339,7 @@ export default function NavBar() {
                 Login / Register
               </Button>
             )}
-          </div>
-        </Navbar.Collapse>
+        </div>
       </Container>
       {/* Bottom LED strip */}
       <div className="nav-led-rail" aria-hidden="true">
@@ -318,6 +382,21 @@ export default function NavBar() {
       </Modal.Footer>
     </Modal>
     <WalletModal show={showWallet} onHide={()=>setShowWallet(false)} />
+    {/* iOS Install helper */}
+    <Modal show={showIosInstall} onHide={() => setShowIosInstall(false)} centered>
+      <Modal.Header closeButton className="bg-dark text-light">
+        <Modal.Title>Install on iPhone/iPad</Modal.Title>
+      </Modal.Header>
+      <Modal.Body className="bg-dark text-light">
+        <p>
+          To install this app: tap the Share button in Safari, then choose
+          <strong> Add to Home Screen</strong>.
+        </p>
+      </Modal.Body>
+      <Modal.Footer className="bg-dark text-light">
+        <Button variant="light" onClick={() => setShowIosInstall(false)}>Got it</Button>
+      </Modal.Footer>
+    </Modal>
     </>
   );
 }

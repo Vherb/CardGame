@@ -40,18 +40,19 @@
 /* Scrollable content area */
 .app-content {
   min-height: calc(100dvh - var(--nav-h) - var(--footer-h, 0px));
-  overflow-y: hidden;
+  overflow-y: auto;
   -webkit-overflow-scrolling: touch;
   padding: 12px 12px 0;
   color: var(--text);
 }
+.app-content--full { padding: 0 !important; overflow: hidden; height: calc(100dvh - var(--nav-h) - var(--footer-h, 0px)); }
 
 /* When GameBoard is embedded, hide its inner header/spacer */
 .cf-embed .nav-spacer,
 .cf-embed .cf-hero { display: none !important; }
 
 /* Let the embedded GameBoard breathe and scroll past the bottom */
-.cf-embed .container { padding: 0 !important; max-width: 100% !important; }
+.cf-embed .container, .cf-embed .container-fluid { padding: 0 !important; max-width: 100% !important; }
 /* Remove extra bottom margin when embedded to avoid extra space */
 /* .cf-embed .board-card-wrap { margin-bottom: 120px !important; } */
 

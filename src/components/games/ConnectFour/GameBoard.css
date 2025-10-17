@@ -58,6 +58,16 @@ html, body, #root { background: var(--bg-body); color: var(--text); -webkit-tap-
 .board-wrap { width: 100%; max-width: min(920px, 100vw - 16px); margin-inline: auto; box-sizing: border-box; padding-top: 0; }
 .cf-stage { perspective: 1000px; perspective-origin: 50% 20%; }
 .board-frame { position: relative; transform: translateZ(0) rotateX(4deg) translateY(2px); transform-style: preserve-3d; }
+.cf3d-wrap { transform: none !important; max-width: 100%; }
+
+/* Full board stage like Checkers 3D */
+.board-fullwrap { position: relative; width: 100%; height: calc(100dvh - var(--nav-h, 56px) - var(--footer-h, 0px)); padding: 0; overflow: hidden; }
+.board-shell { position: fixed; top: var(--nav-h, 56px); left: 0; right: 0; bottom: var(--footer-h, 0px); background: var(--panel-bg); z-index: 1; }
+.board-shell canvas { display: block; width: 100% !important; height: 100% !important; }
+
+/* Full-screen portal shell for C4 3D (leave room for bottom actions ~64px) */
+.c4-fs-shell { position: fixed; top: var(--nav-h, 56px); left: 0; right: 0; height: calc(100dvh - var(--nav-h, 56px) - 64px); background: transparent; z-index: 200; }
+.c4-fs-shell canvas { display:block; width:100% !important; height:100% !important; }
 .board-skin {
   position: relative;
   background:

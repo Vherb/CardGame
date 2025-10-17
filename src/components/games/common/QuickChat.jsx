@@ -34,14 +34,28 @@ export default function QuickChat({ onSend, messages = [], youKey = 'you', align
     } catch {}
   }, [messages]);
   const wrapStyle = {};
-  if (align === 'right' || align === 'left') {
-    if (typeof offsetTop === 'number') wrapStyle.top = `${offsetTop}px`;
-    else if (typeof offsetTop === 'string') wrapStyle.top = offsetTop;
+  if (align === 'right' || align === 'left' || align === 'top') {
+    if (typeof offsetTop === 'number') {
+      wrapStyle.top = `${offsetTop}px`;
+    } else if (typeof offsetTop === 'string') {
+      wrapStyle.top = offsetTop;
+    } else {
+      // No explicit offset provided: compute from real navbar height with a small pad,
+      // falling back to CSS vars if measurement isn't available.
+      try {
+        const nav = document.querySelector('.navbar');
+        const h = nav ? Math.round(nav.getBoundingClientRect().height) : 64;
+        wrapStyle.top = `${h + 12}px`;
+      } catch {
+        wrapStyle.top = 'calc(var(--nav-h, var(--nav-height, 64px)) + 12px)';
+      }
+    }
   }
   // Mobile UX: FAB + bottom sheet with presets and feed at bottom
   if (isMobile) {
     const handleSend = (t) => {
-      if (cooldownMs > 0 || !canSend) return;
+      // Allow sending even if socket isn't ready; GameBoard will queue and flush
+      if (cooldownMs > 0) return;
       const now = Date.now();
       const times = spamRef.current.times.filter(ts => now - ts < 3000);
       times.push(now); spamRef.current.times = times;
@@ -99,16 +113,16 @@ export default function QuickChat({ onSend, messages = [], youKey = 'you', align
                 className="qc-input"
                 value={draft}
                 maxLength={160}
-                placeholder={cooldownMs>0?`Wait ${Math.ceil(cooldownMs/1000)}s…`:(!canSend?'Connecting…':'Type a message…')}
+                placeholder={cooldownMs>0?`Wait ${Math.ceil(cooldownMs/1000)}s…`:'Type a message…'}
                 onChange={(e)=> setDraft(e.target.value)}
                 onKeyDown={(e)=>{ if(e.key==='Enter' && !e.shiftKey){ e.preventDefault(); handleSendDraft(); } }}
-                disabled={cooldownMs>0 || !canSend}
+                disabled={cooldownMs>0}
               />
-              <button type="button" className="qc-send" onClick={handleSendDraft} disabled={cooldownMs>0 || !canSend || !draft.trim()}>Send</button>
+              <button type="button" className="qc-send" onClick={handleSendDraft} disabled={cooldownMs>0 || !draft.trim()}>Send</button>
             </div>
             <div className="qc-row qc-row-mobile">
               {PRESETS.map((t) => (
-                <button key={t} type="button" className="qc-btn" onClick={() => handleSend(t)} disabled={cooldownMs>0 || !canSend}>
+                <button key={t} type="button" className="qc-btn" onClick={() => handleSend(t)} disabled={cooldownMs>0}>
                   {t}
                 </button>
               ))}
@@ -129,9 +143,9 @@ export default function QuickChat({ onSend, messages = [], youKey = 'you', align
           </div>
         )}
         <style>{`
-          .qc-fab{position:fixed;right:.9rem;bottom:calc(var(--footer-h,52px) + env(safe-area-inset-bottom, 0px) + 10px);width:56px;height:56px;border-radius:50%;border:1px solid var(--btn-border);background:var(--btn-bg);color:var(--btn-text);display:grid;place-items:center;box-shadow:0 6px 22px rgba(0,0,0,.25);z-index:5000;font-size:1.35rem}
+          .qc-fab{position:fixed;right:.9rem;bottom:calc(var(--footer-h,52px) + env(safe-area-inset-bottom, 0px) + 10px);width:56px;height:56px;border-radius:50%;border:1px solid var(--btn-border);background:var(--btn-bg);color:var(--btn-text);display:grid;place-items:center;box-shadow:0 6px 22px rgba(0,0,0,.25);z-index:11020;font-size:1.35rem}
           .qc-fab:active{transform:scale(.98)}
-          .qc-sheet{position:fixed;left:0;right:0;bottom:calc(var(--footer-h,52px) + env(safe-area-inset-bottom, 0px));background:var(--panel-bg);border-top-left-radius:14px;border-top-right-radius:14px;padding:.6rem .8rem .7rem;box-shadow:0 -8px 28px rgba(0,0,0,.25);z-index:4999;backdrop-filter:saturate(1.05) blur(6px)}
+          .qc-sheet{position:fixed;left:0;right:0;bottom:calc(var(--footer-h,52px) + env(safe-area-inset-bottom, 0px));background:var(--panel-bg);border-top-left-radius:14px;border-top-right-radius:14px;padding:.6rem .8rem .7rem;box-shadow:0 -8px 28px rgba(0,0,0,.25);z-index:11010;backdrop-filter:saturate(1.05) blur(6px)}
           .qc-sheet-hdr{display:flex;justify-content:space-between;align-items:center;color:var(--text);font-weight:800;margin-bottom:.5rem}
           .qc-sheet-feed{max-height:35vh;overflow:auto;display:flex;flex-direction:column;gap:.35rem;margin-bottom:.55rem}
           .qc-x{appearance:none;background:transparent;border:none;color:var(--muted);font-size:1.5rem;line-height:1;padding:.1rem .3rem;border-radius:.35rem}
@@ -145,7 +159,7 @@ export default function QuickChat({ onSend, messages = [], youKey = 'you', align
           .qc-send{appearance:none;border:1px solid var(--btn-outline);border-radius:.6rem;background:var(--btn-bg);color:var(--btn-text);font-weight:900;padding:.5rem .75rem}
           .qc-hint{color:var(--text);opacity:.9;font-weight:800;margin-top:.5rem}
           .qc-feed{display:flex;flex-direction:column;gap:.35rem;overflow:auto;scroll-behavior:smooth}
-          .qc-feed-float{position:fixed;left:.65rem;bottom:calc(var(--footer-h,52px) + env(safe-area-inset-bottom, 0px) + 8px);max-width:min(320px, 68vw);max-height:40vh;overflow:auto;z-index:4202;padding:.35rem;display:flex;flex-direction:column;gap:.3rem;pointer-events:none;}
+          .qc-feed-float{position:fixed;left:.65rem;bottom:calc(var(--footer-h,52px) + env(safe-area-inset-bottom, 0px) + 8px);max-width:min(320px, 68vw);max-height:40vh;overflow:auto;z-index:11005;padding:.35rem;display:flex;flex-direction:column;gap:.3rem;pointer-events:none;}
           .qc-feed-float.is-hidden{opacity:0;transition:opacity .3s ease}
           .qc-feed-float.is-visible{opacity:1;transition:opacity .15s ease}
           .qc-bubble{background:var(--card-bg);color:var(--text);border:1px solid var(--card-border);padding:.3rem .55rem;border-radius:.55rem;font-size:.9rem;box-shadow:0 8px 20px rgba(0,0,0,.18)}
@@ -157,7 +171,7 @@ export default function QuickChat({ onSend, messages = [], youKey = 'you', align
   }
   // Desktop/tablet: existing side panel UI
   return (
-    <div className={`qc-wrap qc-${align} ${fixed ? 'qc-fixed' : ''}`} style={wrapStyle}>
+    <div className={`qc-wrap qc-${align} qc-fixed`} style={wrapStyle}>
       <div className="qc-row">
         {PRESETS.map((t) => (
           <button key={t} type="button" className="qc-btn" onClick={() => onSend?.(t)}>
@@ -182,14 +196,14 @@ export default function QuickChat({ onSend, messages = [], youKey = 'you', align
         onSend={onSend}
       />
       <style>{`
-        .qc-wrap{position:absolute;pointer-events:auto;z-index:30}
-        .qc-wrap.qc-fixed{position:fixed}
+  .qc-wrap{position:absolute;pointer-events:auto;z-index:1020}
+  .qc-wrap.qc-fixed{position:fixed}
         /* Side panel layouts */
-        .qc-right{top:.65rem;bottom:.65rem;right:.65rem;width:300px;display:flex;flex-direction:column;gap:.5rem}
-        .qc-left{top:.65rem;bottom:.65rem;left:.65rem;width:300px;display:flex;flex-direction:column;gap:.5rem}
+  .qc-right{top:calc(var(--nav-h, var(--nav-height, 64px)) + 12px);bottom:calc(var(--footer-h, 52px) + 8px);right:.65rem;width:300px;display:flex;flex-direction:column;gap:.5rem}
+  .qc-left{top:calc(var(--nav-h, var(--nav-height, 64px)) + 12px);bottom:calc(var(--footer-h, 52px) + 8px);left:.65rem;width:300px;display:flex;flex-direction:column;gap:.5rem}
         /* Top/Bottom bar layouts (legacy) */
-        .qc-bottom{left:0;right:0;bottom:.65rem;display:flex;flex-direction:column;gap:.45rem;align-items:center}
-        .qc-top{left:0;right:0;top:.65rem;display:flex;flex-direction:column;gap:.45rem;align-items:center}
+  .qc-bottom{left:0;right:0;bottom:.65rem;display:flex;flex-direction:column;gap:.45rem;align-items:center}
+  .qc-top{left:0;right:0;top:calc(var(--nav-h, var(--nav-height, 64px)) + 12px);display:flex;flex-direction:column;gap:.45rem;align-items:center}
         .qc-row{display:flex;gap:.4rem;flex-wrap:wrap}
         .qc-right .qc-row, .qc-left .qc-row{justify-content:flex-start}
         .qc-bottom .qc-row, .qc-top .qc-row{justify-content:center}

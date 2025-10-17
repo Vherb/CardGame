@@ -6,9 +6,12 @@ import ConnectFourScreen from "./components/games/ConnectFour/ConnectFourScreen"
 import GameTable from "./components/games/War/GameTable";
 import CheckersScreen from "./components/games/Checkers/CheckersScreen";
 import ChessScreen from "./components/games/Chess/ChessScreen";
+import ConnectFour3DTest from './components/games/ConnectFour3D/ConnectFour3DTest';
 import RaumschachScreen from "./components/games/Chess3D/RaumschachScreen";
 import BattleshipScreen from "./components/games/Battleship/BattleshipScreen";
 import LandingPage from "./components/Landing/LandingPage";
+import AvatarSandbox from './components/avatars/AvatarSandbox';
+import AvatarFreshSandbox from './components/avatars/AvatarFreshSandbox';
 
 import "./App.css";
 import "./theme.css";
@@ -16,6 +19,7 @@ import "bootstrap/dist/css/bootstrap.min.css";
 import RegistrationForm from "./components/RegistrationForm";
 import { Routes, Route, useLocation } from "react-router-dom";
 import MobileBottomNav from "./components/MobileBottomNav";
+import { ENABLE_WAR, ENABLE_BATTLESHIP } from './featureFlags';
 
 /* --- Add: global LedBar used across all pages --- */
 function LedBar({ color = "rgba(255,110,220,0.95)", speed = undefined }) {
@@ -70,11 +74,14 @@ function App() {
           <Route path='/welcome' element={<LandingPage />} />
           <Route path='/roll-of-cards' element={<Home />} />
           <Route path='/connect-four' element={<ConnectFourScreen />} />
-          <Route path='/war' element={<GameTable />} />
+          <Route path="/connect-four-3d" element={<ConnectFour3DTest />} />
+          {ENABLE_WAR && <Route path='/war' element={<GameTable />} />}
           <Route path='/checkers' element={<CheckersScreen />} />
           <Route path='/chess' element={<ChessScreen />} />
           <Route path='/3d-chess' element={<RaumschachScreen />} />
-          <Route path='/battleship' element={<BattleshipScreen />} />
+          {ENABLE_BATTLESHIP && <Route path='/battleship' element={<BattleshipScreen />} />}
+          <Route path='/avatar-sandbox' element={<AvatarSandbox />} />
+          <Route path='/avatar-fresh' element={<AvatarFreshSandbox />} />
         </Routes>
       </ErrorBoundary>
       {/* Mobile-only bottom navigation; adjusts --footer-h when visible */}
@@ -298,7 +305,7 @@ function Footer() {
         <nav className="footer-center" aria-label="Footer">
           <a href="/welcome" className="text-link">Home</a>
           <span className="sep">•</span>
-          <a href="/roll-of-cards" className="text-link">Roll of Cards</a>
+          <a href="/roll-of-cards" className="text-link">In-Between</a>
           <span className="sep d-none d-sm-inline">•</span>
           <a href="/connect-four" className="text-link">Connect Four</a>
           <span className="sep d-none d-sm-inline">•</span>

@@ -60,6 +60,14 @@ function normalizeAvatar(a) {
 	return AVATAR_IDS.has(id) ? id : null;
 }
 
+// Character (3D model) selection for in-scene avatars
+const CHARACTER_IDS = new Set(['astronaut','alien','robot4']);
+function normalizeCharacter(c) {
+	if (typeof c !== 'string') return null;
+	const id = c.trim().toLowerCase();
+	return CHARACTER_IDS.has(id) ? id : null;
+}
+
 /* ---------- Server setup ---------- */
 const PORT = process.env.PORT || 3014;
 const app = express();
@@ -127,6 +135,7 @@ function startCountdown(roomId){
 		usernames: room.usernames,
 		colors: room.colors,
 		avatars: room.avatars,
+		characters: room.characters,
 		stakes: stakesFor(room),   // include both bets at pairing time
 		type: 'paired'
 	};
@@ -159,6 +168,7 @@ function startCountdown(roomId){
 			usernames: r.usernames,
 			colors: r.colors,
 			avatars: r.avatars,
+			characters: r.characters,
 			stakes: stakesFor(r),  // also include stakes on start
 			board: r.game.board
 		};
@@ -208,6 +218,11 @@ function createRoom(a,b){
 	const avB = normalizeAvatar(stB.avatar) || 'alien';
 	const avatars = { 'Player 1': avA, 'Player 2': avB };
 
+	// characters (astronaut/alien) for in-scene 3D models
+	const chA = normalizeCharacter(stA.character) || 'astronaut';
+	const chB = normalizeCharacter(stB.character) || 'alien';
+	const characters = { 'Player 1': chA, 'Player 2': chB };
+
 	const userIds = { 'Player 1': Number.isFinite(stA.userId)?stA.userId:null, 'Player 2': Number.isFinite(stB.userId)?stB.userId:null };
 	const tokens = { 1: uuidv4(), 2: uuidv4() };
 
@@ -215,6 +230,7 @@ function createRoom(a,b){
 		id, game,
 		players:[a,b],
 		usernames, colors, avatars,
+		characters,
 		userIds, tokens,
 		rematchVotes: new Set(),
 		countdownTimer: null,
@@ -285,6 +301,7 @@ function serializeRoom(room){
 			userIds: room.userIds || null,
 			colors: room.colors,
 			avatars: room.avatars,
+			characters: room.characters,
 			tokens: room.tokens,
 			paused: !!room.paused,
 			lastActivity: room.lastActivity || Date.now()
@@ -317,6 +334,7 @@ function restoreRooms(){
 					userIds: (s.userIds && (typeof s.userIds['Player 1'] !== 'undefined' || typeof s.userIds['Player 2'] !== 'undefined')) ? s.userIds : { 'Player 1': null, 'Player 2': null },
 					colors: s.colors || { 'Player 1':'#ef4444', 'Player 2':'#3b82f6' },
 					avatars: s.avatars || { 'Player 1':'rocket', 'Player 2':'alien' },
+					characters: s.characters || { 'Player 1':'astronaut', 'Player 2':'alien' },
 					tokens: (s.tokens && s.tokens[1] && s.tokens[2]) ? s.tokens : { 1: uuidv4(), 2: uuidv4() },
 					rematchVotes: new Set(),
 					countdownTimer: null,
@@ -407,7 +425,7 @@ function attachHandlers(){
 				if(!room.userIds) room.userIds={'Player 1':null,'Player 2':null}; const uid1=Number(data.userId); if(Number.isFinite(uid1)) room.userIds[sideKey]=uid1;
 				if(typeof data.username==='string' && data.username){ if(!room.usernames) room.usernames={'Player 1':'Player 1','Player 2':'Player 2'}; room.usernames[sideKey]=data.username.toString().slice(0,40); }
 				room.paused=true; room.lastActivity=Date.now(); state.set(ws,{ ...(state.get(ws)||{}), roomId: room.id, playerNumber: slot, alive:true });
-				send(ws,{ type:'savedQueued', you: slot, usernames: room.usernames, colors: room.colors, avatars: room.avatars, gameId: room.id, token: room.tokens?.[slot] });
+				send(ws,{ type:'savedQueued', you: slot, usernames: room.usernames, colors: room.colors, avatars: room.avatars, characters: room.characters, gameId: room.id, token: room.tokens?.[slot] });
 				broadcastPresence(room); saveRooms();
 				if(room.players.every(isOpen)){
 					if(!room.countdownTimer && room.countdownValue==null){ try{ console.log('[c4] saved pair -> start countdown', room.id); }catch{} startCountdown(room.id); }
@@ -429,7 +447,7 @@ function attachHandlers(){
         
 				let slot=null; if(token===room.tokens?.[1]) slot=1; else if(token===room.tokens?.[2]) slot=2; if(!slot){ send(ws,{type:'resumeDenied'}); break; }
 				room.players[slot-1]=ws; room.paused=false; room.lastActivity=Date.now(); state.set(ws,{ ...st, roomId: room.id, playerNumber: slot, alive:true });
-				const start={ type:'startGame', currentPlayer: room.game.currentPlayer, board: room.game.board, usernames: room.usernames, colors: room.colors, avatars: room.avatars, stakes: stakesFor(room), gameId: room.id };
+				const start={ type:'startGame', currentPlayer: room.game.currentPlayer, board: room.game.board, usernames: room.usernames, colors: room.colors, avatars: room.avatars, characters: room.characters, stakes: stakesFor(room), gameId: room.id };
 				send(ws,{ ...start, playerNumber: slot, token: room.tokens?.[slot] });
 				const opp = room.players[(slot===1)?1:0]; if(isOpen(opp)) send(opp,{ type:'playerBack', side: slot===1?'Player 1':'Player 2' });
 				broadcastPresence(room); saveRooms();
@@ -502,7 +520,7 @@ function attachHandlers(){
 				room.players[slot-1]=ws; room.paused=true; room.lastActivity=Date.now();
 				const sideKey=(slot===1)?'Player 1':'Player 2'; if(!room.userIds) room.userIds={'Player 1':null,'Player 2':null}; if(Number.isFinite(uid)) room.userIds[sideKey]=uid; if(typeof name==='string' && name){ if(!room.usernames) room.usernames={'Player 1':'Player 1','Player 2':'Player 2'}; room.usernames[sideKey]=name; }
 				state.set(ws,{ ...(state.get(ws)||{}), roomId: room.id, playerNumber: slot, alive:true });
-				send(ws,{ type:'savedQueued', you: slot, usernames: room.usernames, colors: room.colors, avatars: room.avatars, gameId: room.id, token: room.tokens?.[slot] });
+				send(ws,{ type:'savedQueued', you: slot, usernames: room.usernames, colors: room.colors, avatars: room.avatars, characters: room.characters, gameId: room.id, token: room.tokens?.[slot] });
 				broadcastPresence(room); saveRooms();
 				if(room.players.every(isOpen)){
 					if(!room.countdownTimer && room.countdownValue==null){ try{ console.log('[c4] saved claim pair -> start countdown', room.id); }catch{} startCountdown(room.id); }
@@ -523,6 +541,7 @@ function attachHandlers(){
 				const username = (data.username || '').toString().slice(0, 40);
 				const color = normalizeColor(data.color) || null;
 				const avatar = normalizeAvatar(data.avatar) || null;
+				const character = normalizeCharacter(data.character) || null;
 				const userId = Number(data.userId);
 
 				// NEW: read stake (number) from client if provided
@@ -534,6 +553,7 @@ function attachHandlers(){
 				st.username = username;
 				st.desiredColor = color;
 				st.avatar = avatar;
+				st.character = character;
 				if (Number.isFinite(userId)) st.userId = userId;
 				st.stake = stake; // save intended stake
 				state.set(ws, st);

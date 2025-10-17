@@ -1,0 +1,11 @@
+Model Information:
+* title:	CounterStrike Online - Alien Boss "Phobos"
+* source:	https://sketchfab.com/3d-models/counterstrike-online-alien-boss-phobos-63a5ceb322744b188ac79070aa395e7a
+* author:	TimonPokemon (https://sketchfab.com/TimonPokemon)
+
+Model License:
+* license type:	CC-BY-4.0 (http://creativecommons.org/licenses/by/4.0/)
+* requirements:	Author must be credited. Commercial use is allowed.
+
+If you use this 3D model in your project be sure to copy paste this credit wherever you share it:
+This work is based on "CounterStrike Online - Alien Boss "Phobos"" (https://sketchfab.com/3d-models/counterstrike-online-alien-boss-phobos-63a5ceb322744b188ac79070aa395e7a) by TimonPokemon (https://sketchfab.com/TimonPokemon) licensed under CC-BY-4.0 (http://creativecommons.org/licenses/by/4.0/)

@@ -55,9 +55,11 @@ export default function MobileBottomNav() {
     );
   };
 
+  // No actions in bottom nav — keep original five game links
+
   return (
     <nav ref={ref} className="mobile-bottom-nav" role="navigation" aria-label="Game shortcuts">
-  <Item to="/roll-of-cards" label="In-Between" icon={<span>🃏</span>} />
+      <Item to="/roll-of-cards" label="In-Between" icon={<span>🃏</span>} />
       <Item to="/connect-four" label="C4" icon={<span>⦿</span>} />
       <Item to="/checkers" label="Checkers" icon={<span>⛀</span>} />
       <Item to="/chess" label="Chess" icon={<span>♟︎</span>} />

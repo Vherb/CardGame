@@ -14,6 +14,9 @@ export default function GameSetup({
   joinLabel = 'Join Game',
   onJoin,
   joinDisabled = false,
+  // New: character picker
+  characterId,
+  onPickCharacter,
   avatarId,
   avatarGlyph,
   onOpenAvatarModal,
@@ -90,6 +93,35 @@ export default function GameSetup({
           </Row>
 
           <Row className="g-3 mt-2">
+            {/* Character (above Avatar) */}
+            {(onPickCharacter) && (
+              <Col xs={12}>
+                <Form.Label className="fw-bold d-flex align-items-center">
+                  <i className="bi bi-robot me-2" /> Character
+                </Form.Label>
+                <div className="d-flex flex-wrap gap-3 gs-characters">
+                  {[
+                    { id: 'astronaut', label: 'Astronaut', glyph: '👨‍🚀' },
+                    { id: 'alien', label: 'Alien', glyph: '👾' },
+                    { id: 'robot4', label: 'Robot 4', glyph: '🤖' },
+                  ].map(opt => (
+                    <label key={opt.id} className="gs-char-option d-flex align-items-center gap-2" style={{ cursor:'pointer' }}>
+                      <input
+                        type="radio"
+                        name="gs-character"
+                        value={opt.id}
+                        checked={(characterId || 'astronaut') === opt.id}
+                        onChange={() => onPickCharacter && onPickCharacter(opt.id)}
+                        className="gs-char-input"
+                      />
+                      <span className="gs-char-bullet" aria-hidden="true" />
+                      <span style={{ fontSize: 20 }}>{opt.glyph}</span>
+                      <span>{opt.label}</span>
+                    </label>
+                  ))}
+                </div>
+              </Col>
+            )}
             <Col xs={12} md={8}>
               {Array.isArray(colors) && colors.length > 0 ? (
                 <>

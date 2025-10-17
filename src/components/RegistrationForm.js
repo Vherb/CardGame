@@ -6,15 +6,30 @@ import Container from "react-bootstrap/Container";
 import NavBar from "./NavBar";
 import "bootstrap/dist/css/bootstrap.min.css";
 
-/** Resolve API base so it works on phone via LAN IP (e.g. 192.168.x.x) */
+/** Resolve API base
+ * - In production behind a reverse proxy (no port or standard ports), use same-origin "/api"
+ * - Honor REACT_APP_API_BASE if provided
+ * - In dev (CRA on :3000), fall back to http(s)://host:3002
+ */
 function resolveApiBase() {
-  if (process.env.REACT_APP_API_BASE) return process.env.REACT_APP_API_BASE;
-  const { protocol, hostname } = window.location;
+  const envBase = (process.env.REACT_APP_API_BASE || '').trim();
+  if (envBase) return envBase; // e.g. "/api" or full URL
+
+  const { protocol, hostname, port } = window.location;
   const envHost = (process.env.REACT_APP_SERVER_HOST || '').trim();
   const winHost = (window.SERVER_HOST ? String(window.SERVER_HOST).trim() : '');
-  let lsHost = ''; try { lsHost = (localStorage.getItem('serverHost') || '').trim(); } catch {}
+  let lsHost = '';
+  try { lsHost = (localStorage.getItem('serverHost') || '').trim(); } catch {}
   const host = envHost || winHost || lsHost || hostname;
-  return `${protocol}//${host}:3002`;
+
+  // Production/same-origin: when served via standard ports or no explicit port
+  if (!port || port === '443' || port === '80') {
+    return '/api';
+  }
+
+  // Dev fallback: CRA on 3000 talks to backend on 3002
+  const targetPort = port === '3000' ? '3002' : port;
+  return `${protocol}//${host}:${targetPort}`;
 }
 const API = resolveApiBase();
 
