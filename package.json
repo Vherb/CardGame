@@ -31,6 +31,7 @@
     "framer-motion": "^12.23.12",
     "http": "^0.0.1-security",
     "jsonwebtoken": "^9.0.2",
+    "multer": "^2.0.2",
     "mysql": "^2.18.1",
     "mysql2": "^3.6.5",
     "path-browserify": "^1.0.1",
@@ -61,7 +62,7 @@
     "serve:chess": "node src/components/games/Chess/server.js",
     "serve:raum": "node src/components/games/Chess3D/server.js",
     "serve:c4": "node src/components/games/ConnectFour/server.js",
-  "serve:battleship": "node src/components/games/Battleship/server.js",
+    "serve:battleship": "node src/components/games/Battleship/server.js",
     "run:mc": "node src/components/games/MonteCarloRollOfCards/server.js"
   },
   "eslintConfig": {

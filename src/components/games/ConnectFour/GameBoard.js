@@ -555,6 +555,17 @@ export default function GameBoard({ embedded = false }) {
       if (data.type === 'savedQueued') {
         const youRole = data.you === 2 ? 'Player 2' : 'Player 1';
         setPairedInfo({ you: data.you, usernames: data.usernames||{'Player 1':'P1','Player 2':'P2'}, colors: data.colors||{'Player 1':'#EF4444','Player 2':'#3B82F6'}, avatars: data.avatars||{'Player 1':'rocket','Player 2':'alien'}, characters: data.characters || { 'Player 1': characterId || 'astronaut', 'Player 2': 'alien' }, stakes: pairedInfo?.stakes||{}, gameId: data.gameId||null, token: data.token||null });
+        // Initialize remote avatar position if provided
+        try {
+          if (data.avatarPositions) {
+            const remoteSide = youRole === 'Player 1' ? 'Player 2' : 'Player 1';
+            const remotePos = data.avatarPositions[remoteSide];
+            if (remotePos && Number.isFinite(remotePos.x) && Number.isFinite(remotePos.z)) {
+              // Don't initialize from server cache - it may be stale
+              // Instead, wait for fresh avatarUpdate from opponent
+            }
+          }
+        } catch {}
         setShowMatch(true); setCountdown(null); setLobbyStatus('matching');
         pendingSavedJoinRef.current = null;
         joinIntentRef.current = null;
@@ -572,6 +583,18 @@ export default function GameBoard({ embedded = false }) {
           gameId: data.gameId || null,
           token: data.token || null,
         });
+        // Initialize remote avatar position if provided
+        try {
+          if (data.avatarPositions) {
+            const role = data.you === 1 ? 'Player 1' : 'Player 2';
+            const remoteSide = role === 'Player 1' ? 'Player 2' : 'Player 1';
+            const remotePos = data.avatarPositions[remoteSide];
+            if (remotePos && Number.isFinite(remotePos.x) && Number.isFinite(remotePos.z)) {
+              // Don't initialize from server cache - it may be stale
+              // Instead, wait for fresh avatarUpdate from opponent
+            }
+          }
+        } catch {}
         setShowMatch(true); setCountdown(null); setLobbyStatus('matching'); joinIntentRef.current = null; return;
       }
       if (data.type === 'quickChat'){
@@ -639,6 +662,48 @@ export default function GameBoard({ embedded = false }) {
 
         const yours=(data.currentPlayer||'Player 1')===role;
         setTurnToast(yours?"It's your turn!":"It's your opponent's turn!"); setTimeout(()=>setTurnToast(null),1100);
+        
+        // Dispatch event to notify 3D view that game has fully loaded
+        try {
+          window.dispatchEvent(new CustomEvent('cf:gameLoaded', { detail: { role } }));
+        } catch {}
+        
+        // Load placed cubes from server
+        try {
+          if (Array.isArray(data.placedCubes)) {
+            window.__CF_REMOTE_CUBES__ = data.placedCubes;
+            // Also dispatch event so 3D view can load immediately
+            window.dispatchEvent(new CustomEvent('cf:cubes_loaded', { 
+              detail: { cubes: data.placedCubes } 
+            }));
+          }
+        } catch {}
+        
+        // Load audio visualizers from server
+        try {
+          if (Array.isArray(data.audioVisualizers)) {
+            window.__CF_REMOTE_VISUALIZERS__ = data.audioVisualizers;
+            // Also dispatch event so 3D view can load immediately
+            window.dispatchEvent(new CustomEvent('cf:visualizers_loaded', { 
+              detail: { visualizers: data.audioVisualizers } 
+            }));
+          }
+        } catch {}
+        
+        // Initialize remote avatar position if provided by server
+        try {
+          if (data.avatarPositions) {
+            const remoteSide = role === 'Player 1' ? 'Player 2' : 'Player 1';
+            const remotePos = data.avatarPositions[remoteSide];
+            if (remotePos && Number.isFinite(remotePos.x) && Number.isFinite(remotePos.z)) {
+              // Don't initialize from server cache - it may be stale
+              // Instead, just mark opponent as potentially connected
+              // Wait for them to send their current position via avatarUpdate
+              // This prevents showing them at an old/spawn position
+            }
+          }
+        } catch {}
+        
         // flush any pending chat queued during reconnect
         try{
           const msg = pendingChatRef.current;
@@ -681,14 +746,68 @@ export default function GameBoard({ embedded = false }) {
         } catch {}
         return;
       }
+      
+      // Handle remote cube sync updates
+      if (data.type === 'cubes_sync' && Array.isArray(data.cubes)) {
+        try {
+          // Set remote cubes to global for 3D view to poll
+          window.__CF_REMOTE_CUBES__ = data.cubes;
+          // Also dispatch custom event for immediate update
+          window.dispatchEvent(new CustomEvent('cf:cubes_update', { 
+            detail: { cubes: data.cubes } 
+          }));
+        } catch (err) {
+          console.warn('Failed to handle cubes_sync:', err);
+        }
+        return;
+      }
+      
+      // Handle remote visualizer sync updates
+      if (data.type === 'visualizers_sync' && Array.isArray(data.visualizers)) {
+        try {
+          // Set remote visualizers to global for 3D view to poll
+          window.__CF_REMOTE_VISUALIZERS__ = data.visualizers;
+          // Also dispatch custom event for immediate update
+          window.dispatchEvent(new CustomEvent('cf:visualizers_update', { 
+            detail: { visualizers: data.visualizers } 
+          }));
+        } catch (err) {
+          console.warn('Failed to handle visualizers_sync:', err);
+        }
+        return;
+      }
+      
+      // Handle sound upload notifications
+      if (data.type === 'sound_uploaded' && data.filename) {
+        try {
+          // Dispatch event to notify 3D view that opponent uploaded a sound
+          window.dispatchEvent(new CustomEvent('cf:sound_uploaded', { 
+            detail: { filename: data.filename } 
+          }));
+        } catch (err) {
+          console.warn('Failed to handle sound_uploaded:', err);
+        }
+        return;
+      }
       if (data.type === 'playerLeft' && data.side) {
         setPresence(prev => ({ ...prev, [data.side]: false }));
         setTurnToast('Opponent disconnected — waiting…'); setTimeout(()=>setTurnToast(null), 1400);
+        // Dispatch custom event for 3D view to listen - but only if game is actually active
+        try {
+          if (gameActiveRef.current) {
+            window.dispatchEvent(new CustomEvent('cf:playerLeft', { detail: data }));
+          }
+        } catch {}
         return;
       }
       if (data.type === 'playerBack' && data.side) {
         setPresence(prev => ({ ...prev, [data.side]: true }));
         setTurnToast('Opponent reconnected'); setTimeout(()=>setTurnToast(null), 1200);
+        // Dispatch custom event for 3D view to listen
+        // Always dispatch for playerBack since server only sends this when resuming an active game
+        try {
+          window.dispatchEvent(new CustomEvent('cf:playerBack', { detail: data }));
+        } catch {}
         return;
       }
 
@@ -927,6 +1046,49 @@ export default function GameBoard({ embedded = false }) {
 
   // Feed for 3D view: send my live avatar movement over the socket
   const handleAvatarMove = useCallback((msg) => {
+    // Handle cube sync messages
+    if (msg && msg.type === 'cubes_sync' && Array.isArray(msg.cubes)) {
+      withOpenSocket((sock) => {
+        try {
+          sock.send(JSON.stringify({ 
+            type: 'cubes_sync', 
+            cubes: msg.cubes, 
+            timestamp: msg.timestamp || Date.now() 
+          }));
+        } catch {}
+      });
+      return;
+    }
+    
+    // Handle visualizer sync messages
+    if (msg && msg.type === 'visualizers_sync' && Array.isArray(msg.visualizers)) {
+      withOpenSocket((sock) => {
+        try {
+          sock.send(JSON.stringify({ 
+            type: 'visualizers_sync', 
+            visualizers: msg.visualizers, 
+            timestamp: msg.timestamp || Date.now() 
+          }));
+        } catch {}
+      });
+      return;
+    }
+    
+    // Handle sound upload notifications
+    if (msg && msg.type === 'sound_uploaded' && msg.filename) {
+      withOpenSocket((sock) => {
+        try {
+          sock.send(JSON.stringify({ 
+            type: 'sound_uploaded', 
+            filename: msg.filename, 
+            timestamp: msg.timestamp || Date.now() 
+          }));
+        } catch {}
+      });
+      return;
+    }
+    
+    // Handle regular avatar movement
     if (!msg || typeof msg.x !== 'number' || typeof msg.z !== 'number') return;
     const yaw = typeof msg.yaw === 'number' ? msg.yaw : null;
     const run = !!msg.run;
@@ -967,6 +1129,8 @@ export default function GameBoard({ embedded = false }) {
     setLobbyStatus('idle',{force:true});
     // Avoid instantly rejoining saved game on reconnect; we still keep cfResume for later
     joinIntentRef.current = 'suppress';
+    // Clear resume token so WebSocket doesn't auto-resume on reconnect
+    try { localStorage.removeItem('cfResume'); } catch {}
     cleanSocket(); connectWSRef.current(false);
   };
 

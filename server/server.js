@@ -28,6 +28,7 @@ const mysql = require("mysql2");
 const bodyParser = require("body-parser");
 const bcrypt = require("bcrypt");
 const cors = require("cors");
+const multer = require("multer");
 const jwt = require("jsonwebtoken");
 const { generateToken } = require("./jwt");
 const JWT_SECRET = process.env.JWT_SECRET || "1234";
@@ -113,6 +114,73 @@ if (ENABLE_CORS) {
 
 // Health check
 app.get("/ping", (_req, res) => res.json({ ok: true }));
+
+/* -------------------- Sound File Upload -------------------- */
+// Configure multer for sound file uploads
+const storage = multer.diskStorage({
+  destination: function (req, file, cb) {
+    const uploadPath = path.join(__dirname, '..', 'public', 'sounds', 'Spacial Aduio Sounds');
+    // Ensure directory exists
+    if (!fs.existsSync(uploadPath)) {
+      fs.mkdirSync(uploadPath, { recursive: true });
+    }
+    cb(null, uploadPath);
+  },
+  filename: function (req, file, cb) {
+    // Sanitize filename - remove special characters, keep only alphanumeric, dash, underscore
+    const sanitized = file.originalname.replace(/[^a-zA-Z0-9._-]/g, '_');
+    cb(null, sanitized);
+  }
+});
+
+const upload = multer({ 
+  storage: storage,
+  fileFilter: function (req, file, cb) {
+    // Only accept audio files
+    if (file.mimetype.startsWith('audio/')) {
+      cb(null, true);
+    } else {
+      cb(new Error('Only audio files are allowed!'), false);
+    }
+  },
+  limits: {
+    fileSize: 50 * 1024 * 1024 // 50MB max file size
+  }
+});
+
+// Upload endpoint
+app.post('/api/upload-sound', upload.single('sound'), (req, res) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({ success: false, error: 'No file uploaded' });
+    }
+    res.json({ 
+      success: true, 
+      filename: req.file.filename,
+      message: 'Sound file uploaded successfully'
+    });
+  } catch (error) {
+    console.error('Upload error:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// Get list of available sound files
+app.get('/api/sounds', (req, res) => {
+  try {
+    const soundsPath = path.join(__dirname, '..', 'public', 'sounds', 'Spacial Aduio Sounds');
+    if (!fs.existsSync(soundsPath)) {
+      return res.json({ sounds: [] });
+    }
+    const files = fs.readdirSync(soundsPath).filter(file => 
+      file.endsWith('.mp3') || file.endsWith('.wav') || file.endsWith('.ogg')
+    );
+    res.json({ sounds: files });
+  } catch (error) {
+    console.error('Error reading sounds:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
 
 /* -------------------- Helpers (XLM) -------------------- */
 async function horizonAccount(pub) {

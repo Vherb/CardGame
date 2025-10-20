@@ -62,7 +62,7 @@ function normalizeAvatar(a) {
 
 /* ---------- Character (3D model) helper ---------- */
 // Currently supported character ids for 3D models
-const CHARACTER_IDS = new Set(['astronaut', 'alien', 'robot4']);
+const CHARACTER_IDS = new Set(['astronaut', 'alien', 'robot4', 'guy1']);
 function normalizeCharacter(ch) {
   if (typeof ch !== 'string') return null;
   const id = ch.trim().toLowerCase();
@@ -138,6 +138,7 @@ function startCountdown(roomId){
     avatars: room.avatars,
     characters: room.characters,
     stakes: stakesFor(room),   // include both bets at pairing time
+    avatarPositions: room.avatarPositions || {},  // Include current avatar positions
     type: 'paired'
   };
   const [a,b] = room.players;
@@ -171,7 +172,10 @@ function startCountdown(roomId){
       avatars: r.avatars,
       characters: r.characters,
       stakes: stakesFor(r),  // also include stakes on start
-      board: r.game.board
+      board: r.game.board,
+      avatarPositions: r.avatarPositions || {},  // Include current avatar positions
+      placedCubes: r.placedCubes || [],  // Include placed cubes/spheres
+      audioVisualizers: r.audioVisualizers || []  // Include audio visualizers
     };
     const [sa,sb] = r.players;
     send(sa, { ...start, playerNumber:1, token: r.tokens?.[1], gameId: r.id });
@@ -305,7 +309,8 @@ function serializeRoom(room){
       characters: room.characters,
       tokens: room.tokens,
       paused: !!room.paused,
-      lastActivity: room.lastActivity || Date.now()
+      lastActivity: room.lastActivity || Date.now(),
+      placedCubes: room.placedCubes || [] // Save placed cubes/spheres
     };
   }catch{ return null; }
 }
@@ -341,7 +346,9 @@ function restoreRooms(){
           countdownTimer: null,
           countdownValue: null,
           paused: !!s.paused,
-          lastActivity: Number(s.lastActivity)||Date.now()
+          lastActivity: Number(s.lastActivity)||Date.now(),
+          placedCubes: Array.isArray(s.placedCubes) ? s.placedCubes : [], // Restore placed cubes
+          avatarPositions: {} // Will be populated as players connect
         };
         rooms.set(room.id, room);
       }catch{}
@@ -426,7 +433,7 @@ function attachHandlers(){
         if(!room.userIds) room.userIds={'Player 1':null,'Player 2':null}; const uid1=Number(data.userId); if(Number.isFinite(uid1)) room.userIds[sideKey]=uid1;
         if(typeof data.username==='string' && data.username){ if(!room.usernames) room.usernames={'Player 1':'Player 1','Player 2':'Player 2'}; room.usernames[sideKey]=data.username.toString().slice(0,40); }
         room.paused=true; room.lastActivity=Date.now(); state.set(ws,{ ...(state.get(ws)||{}), roomId: room.id, playerNumber: slot, alive:true });
-  send(ws,{ type:'savedQueued', you: slot, usernames: room.usernames, colors: room.colors, avatars: room.avatars, characters: room.characters, gameId: room.id, token: room.tokens?.[slot] });
+  send(ws,{ type:'savedQueued', you: slot, usernames: room.usernames, colors: room.colors, avatars: room.avatars, characters: room.characters, gameId: room.id, token: room.tokens?.[slot], avatarPositions: room.avatarPositions || {} });
         broadcastPresence(room); saveRooms();
         if(room.players.every(isOpen)){
           if(!room.countdownTimer && room.countdownValue==null){ try{ console.log('[c4] saved pair -> start countdown', room.id); }catch{} startCountdown(room.id); }
@@ -448,9 +455,26 @@ function attachHandlers(){
         
         let slot=null; if(token===room.tokens?.[1]) slot=1; else if(token===room.tokens?.[2]) slot=2; if(!slot){ send(ws,{type:'resumeDenied'}); break; }
         room.players[slot-1]=ws; room.paused=false; room.lastActivity=Date.now(); state.set(ws,{ ...st, roomId: room.id, playerNumber: slot, alive:true });
-  const start={ type:'startGame', currentPlayer: room.game.currentPlayer, board: room.game.board, usernames: room.usernames, colors: room.colors, avatars: room.avatars, characters: room.characters, stakes: stakesFor(room), gameId: room.id };
+  const start={ type:'startGame', currentPlayer: room.game.currentPlayer, board: room.game.board, usernames: room.usernames, colors: room.colors, avatars: room.avatars, characters: room.characters, stakes: stakesFor(room), gameId: room.id, avatarPositions: room.avatarPositions || {}, placedCubes: room.placedCubes || [], audioVisualizers: room.audioVisualizers || [] };
         send(ws,{ ...start, playerNumber: slot, token: room.tokens?.[slot] });
-        const opp = room.players[(slot===1)?1:0]; if(isOpen(opp)) send(opp,{ type:'playerBack', side: slot===1?'Player 1':'Player 2' });
+        const opp = room.players[(slot===1)?1:0]; 
+        if(isOpen(opp)) {
+          send(opp,{ type:'playerBack', side: slot===1?'Player 1':'Player 2' });
+          // Also send opponent's position to the reconnecting player if available
+          try {
+            const oppSide = slot === 1 ? 'Player 2' : 'Player 1';
+            const oppPos = (room.avatarPositions || {})[oppSide];
+            if (oppPos && Number.isFinite(oppPos.x) && Number.isFinite(oppPos.z)) {
+              const now = Date.now();
+              const payload = { type: 'avatarUpdate', side: oppSide, x: oppPos.x, z: oppPos.z, ts: now };
+              if (Number.isFinite(oppPos.yaw)) payload.yaw = oppPos.yaw;
+              payload.run = !!oppPos.run;
+              payload.isJumping = !!oppPos.isJumping;
+              if (typeof oppPos.lift === 'number') payload.lift = oppPos.lift;
+              send(ws, payload);
+            }
+          } catch {}
+        }
         broadcastPresence(room); saveRooms();
         break;
       }
@@ -696,6 +720,11 @@ function attachHandlers(){
           const isJumping = !!data.isJumping;
           const lift = (typeof data.lift === 'number' && Number.isFinite(data.lift)) ? Number(data.lift) : undefined;
           if (!Number.isFinite(x) || !Number.isFinite(z)) break;
+          
+          // Store the position on the room for new players joining
+          if (!room.avatarPositions) room.avatarPositions = {};
+          room.avatarPositions[side] = { x, z, yaw, run, isJumping, lift };
+          
           const payload = { type: 'avatarUpdate', side, x, z, ts: now };
           if (Number.isFinite(yaw)) payload.yaw = yaw;
           // Always include run as a boolean so spectators don't keep a stale running state
@@ -705,6 +734,104 @@ function attachHandlers(){
           if (typeof lift === 'number') payload.lift = lift;
           broadcast(room, payload);
         } catch {}
+        break;
+      }
+      
+      case 'cubes_sync': {
+        // Synchronize placed cubes/spheres/cylinders between players
+        // Expect payload: { type: 'cubes_sync', cubes: Array, timestamp: number }
+        try {
+          const st1 = state.get(ws) || {};
+          if (!st1.roomId || !(st1.playerNumber === 1 || st1.playerNumber === 2)) break;
+          const room = rooms.get(st1.roomId); if (!room) break;
+          
+          // Throttle cube updates (min interval ~200ms to avoid spam)
+          const now = Date.now();
+          st1._lastCubesTs = st1._lastCubesTs || 0;
+          if ((now - st1._lastCubesTs) < 200) { break; }
+          st1._lastCubesTs = now; state.set(ws, st1);
+          
+          // Validate cubes array
+          if (!Array.isArray(data.cubes)) break;
+          
+          // Store cubes in room (server-side persistence)
+          room.placedCubes = data.cubes;
+          room.lastActivity = now;
+          
+          // Save to disk so cubes persist across server restarts
+          saveRooms();
+          
+          // Broadcast cube data to room
+          broadcast(room, { 
+            type: 'cubes_sync', 
+            cubes: data.cubes,
+            timestamp: data.timestamp || now
+          });
+        } catch (err) {
+          console.error('Error handling cubes_sync:', err);
+        }
+        break;
+      }
+      
+      case 'visualizers_sync': {
+        // Synchronize audio visualizers between players
+        // Expect payload: { type: 'visualizers_sync', visualizers: Array, timestamp: number }
+        try {
+          const st1 = state.get(ws) || {};
+          if (!st1.roomId || !(st1.playerNumber === 1 || st1.playerNumber === 2)) break;
+          const room = rooms.get(st1.roomId); if (!room) break;
+          
+          // Throttle visualizer updates (min interval ~200ms to avoid spam)
+          const now = Date.now();
+          st1._lastVisualizersTs = st1._lastVisualizersTs || 0;
+          if ((now - st1._lastVisualizersTs) < 200) { break; }
+          st1._lastVisualizersTs = now; state.set(ws, st1);
+          
+          // Validate visualizers array
+          if (!Array.isArray(data.visualizers)) break;
+          
+          // Store visualizers in room (server-side persistence)
+          room.audioVisualizers = data.visualizers;
+          room.lastActivity = now;
+          
+          // Save to disk so visualizers persist across server restarts
+          saveRooms();
+          
+          // Broadcast visualizer data to room
+          broadcast(room, { 
+            type: 'visualizers_sync', 
+            visualizers: data.visualizers,
+            timestamp: data.timestamp || now
+          });
+        } catch (err) {
+          console.error('Error handling visualizers_sync:', err);
+        }
+        break;
+      }
+      
+      case 'sound_uploaded': {
+        // Notify other player when someone uploads a new sound file
+        // Expect payload: { type: 'sound_uploaded', filename: string, timestamp: number }
+        try {
+          const st1 = state.get(ws) || {};
+          if (!st1.roomId || !(st1.playerNumber === 1 || st1.playerNumber === 2)) break;
+          const room = rooms.get(st1.roomId); if (!room) break;
+          
+          // Validate filename
+          if (!data.filename || typeof data.filename !== 'string') break;
+          
+          const now = Date.now();
+          room.lastActivity = now;
+          
+          // Broadcast sound upload notification to room
+          broadcast(room, { 
+            type: 'sound_uploaded', 
+            filename: data.filename,
+            timestamp: data.timestamp || now
+          });
+        } catch (err) {
+          console.error('Error handling sound_uploaded:', err);
+        }
         break;
       }
     }

@@ -102,6 +102,7 @@ export default function GameSetup({
                 <div className="d-flex flex-wrap gap-3 gs-characters">
                   {[
                     { id: 'astronaut', label: 'Astronaut', glyph: '👨‍🚀' },
+                    { id: 'guy1', label: 'Guy 1', glyph: '🧑' },
                     { id: 'alien', label: 'Alien', glyph: '👾' },
                     { id: 'robot4', label: 'Robot 4', glyph: '🤖' },
                   ].map(opt => (

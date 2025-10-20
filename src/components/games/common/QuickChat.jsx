@@ -9,12 +9,28 @@ export default function QuickChat({ onSend, messages = [], youKey = 'you', align
   const [cooldownMs, setCooldownMs] = useState(0);
   const [draft, setDraft] = useState('');
   const [visible, setVisible] = useState(false);
+  const [isHidden, setIsHidden] = useState(false);
   const spamRef = useRef({ times: [], timer: null, hideTimer: null });
   const isMobile = useMemo(()=>{
     try{ return typeof window!== 'undefined' && (window.matchMedia('(pointer:coarse)').matches || window.matchMedia('(max-width: 640px)').matches); }catch{return false;}
   },[]);
   const feedRef = useRef(null);         // floating feed
   const sheetFeedRef = useRef(null);    // feed inside bottom sheet
+  
+  // Check for global hide flag
+  useEffect(() => {
+    const checkHideFlag = () => {
+      const shouldHide = !!window.__CF_HIDE_CHAT__;
+      if (shouldHide !== isHidden) {
+        console.log('QuickChat hide state changing:', { wasHidden: isHidden, nowHidden: shouldHide, flagValue: window.__CF_HIDE_CHAT__ });
+        setIsHidden(shouldHide);
+      }
+    };
+    checkHideFlag();
+    const interval = setInterval(checkHideFlag, 50); // Check more frequently
+    return () => clearInterval(interval);
+  }, [isHidden]);
+  
   useEffect(() => {
     // Scroll whichever feed is visible
     try {
@@ -51,6 +67,13 @@ export default function QuickChat({ onSend, messages = [], youKey = 'you', align
       }
     }
   }
+  
+  // Hide component if global flag is set
+  if (isHidden) {
+    console.log('QuickChat returning null (hidden)');
+    return null;
+  }
+  
   // Mobile UX: FAB + bottom sheet with presets and feed at bottom
   if (isMobile) {
     const handleSend = (t) => {
