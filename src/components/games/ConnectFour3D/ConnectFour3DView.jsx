@@ -1,16 +1,24 @@
 import React, { useMemo, useRef, useLayoutEffect, Suspense, useCallback, useEffect, useState } from 'react';
-import { Canvas, useFrame, useThree } from '@react-three/fiber';
+import { Canvas, useFrame, useThree, extend } from '@react-three/fiber';
 import { OrbitControls, TransformControls, useGLTF, useFBX, useAnimations, Text, Billboard, useTexture, RoundedBox, PositionalAudio, Html } from '@react-three/drei';
 import { clone as skeletonClone } from 'three/examples/jsm/utils/SkeletonUtils.js';
 import * as THREE from 'three';
+import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass';
+import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer';
+import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass';
+
+// Extend Three.js to make postprocessing classes available in JSX
+extend({ EffectComposer, RenderPass, UnrealBloomPass });
 
 const COLS = 7;
 const ROWS = 6;
 const CELL = 1;
 const GAP = 0.1;
 const BOARD_THICK = 0.22;
-// Global play area radius (controls floor size and how far avatars can roam)
-const PLAY_AREA_RADIUS = 450; // expanded for a much larger area
+// Global play area radius (controls how far avatars can roam - set very large for free exploration)
+const PLAY_AREA_RADIUS = 99999; // Effectively unlimited movement
+// Terrain visual size (separate from movement boundary)
+const TERRAIN_RADIUS = 450; // Size of the lunar surface terrain
 // Simple staircase parameters (world coordinates)
 const STAIR_POS_X = 28;      // center X of the staircase
 const STAIR_POS_Z = 0;       // bottom starts at zMin and goes toward +Z
@@ -53,10 +61,12 @@ function setExtraStairsDef(def){ EXTRA_STAIRS_DEF = def; }
 
 // Runtime-configurable placed cubes/spheres (for multiplayer sync and collision)
 let CURRENT_PLACED_CUBES = [];
-function updatePlacedCubesCache(cubes) { CURRENT_PLACED_CUBES = cubes || []; }
+function updatePlacedCubesCache(cubes) { 
+  CURRENT_PLACED_CUBES = cubes || [];
+}
 
 // Shared terrain height calculation (matches the LunarTerrain geometry)
-function getTerrainHeightXZ(x, z, flatRadius = 50, maxRadius = PLAY_AREA_RADIUS) {
+function getTerrainHeightXZ(x, z, flatRadius = 50, maxRadius = TERRAIN_RADIUS) {
   const distFromCenter = Math.sqrt(x * x + z * z);
   
   // Keep center area flat for Connect Four table
@@ -143,6 +153,95 @@ function getTerrainHeightXZ(x, z, flatRadius = 50, maxRadius = PLAY_AREA_RADIUS)
   
   // Return max to avoid going through peaks
   return Math.max(h1, h2, h3, h4, h5);
+}
+
+// Get terrain height for a generated terrain cube at position (x, z)
+function getGeneratedTerrainHeight(x, z, terrainCube) {
+  // Check if position is within the terrain cube bounds
+  const halfX = terrainCube.scale.x / 2;
+  const halfZ = terrainCube.scale.z / 2;
+  const minX = terrainCube.position.x - halfX;
+  const maxX = terrainCube.position.x + halfX;
+  const minZ = terrainCube.position.z - halfZ;
+  const maxZ = terrainCube.position.z + halfZ;
+  
+  if (x < minX || x > maxX || z < minZ || z > maxZ) {
+    return null; // Outside this terrain cube
+  }
+  
+  // If terrain generation is not enabled, return flat top of box
+  if (!terrainCube.hasTerrainNoise) {
+    return terrainCube.position.y + (terrainCube.scale.y / 2);
+  }
+  
+  // Calculate local position relative to terrain center
+  const localX = x - terrainCube.position.x;
+  const localZ = z - terrainCube.position.z;
+  
+  // Get terrain parameters
+  const terrainScale = terrainCube.terrainScale || 0.015;
+  const terrainHeightMultiplier = terrainCube.terrainHeightMultiplier || 8;
+  const terrainMoundScale = terrainCube.terrainMoundScale || 0.008;
+  const terrainMoundMultiplier = terrainCube.terrainMoundMultiplier || 15;
+  const terrainOctaves = terrainCube.terrainOctaves || 4;
+  const edgeBlendPercent = terrainCube.terrainEdgeBlend || 0.25;
+  
+  // Noise functions (same as TerrainGeometry)
+  const hash21 = (x, y) => {
+    let n = Math.sin(x * 127.1 + y * 311.7) * 43758.5453123;
+    return n - Math.floor(n);
+  };
+  
+  const noise = (x, y) => {
+    const ix = Math.floor(x);
+    const iy = Math.floor(y);
+    const fx = x - ix;
+    const fy = y - iy;
+    
+    const a = hash21(ix, iy);
+    const b = hash21(ix + 1, iy);
+    const c = hash21(ix, iy + 1);
+    const d = hash21(ix + 1, iy + 1);
+    
+    const ux = fx * fx * (3 - 2 * fx);
+    const uy = fy * fy * (3 - 2 * fy);
+    
+    return a * (1 - ux) * (1 - uy) +
+           b * ux * (1 - uy) +
+           c * (1 - ux) * uy +
+           d * ux * uy;
+  };
+  
+  const fbm = (x, y, octaves) => {
+    let value = 0;
+    let amplitude = 1;
+    let frequency = 1;
+    
+    for (let i = 0; i < octaves; i++) {
+      value += amplitude * noise(x * frequency, y * frequency);
+      frequency *= 2.0;
+      amplitude *= 0.5;
+    }
+    
+    return value;
+  };
+  
+  // Calculate normalized distance from edges (same as TerrainGeometry)
+  const normalizedX = Math.abs(localX) / halfX;
+  const normalizedZ = Math.abs(localZ) / halfZ;
+  const normalizedDist = Math.max(normalizedX, normalizedZ);
+  
+  // Calculate blend zone
+  const blendZone = Math.max(0, Math.min(1, (normalizedDist - (1 - edgeBlendPercent)) / edgeBlendPercent));
+  const smoothBlend = blendZone * blendZone * (3 - 2 * blendZone);
+  const heightMultiplierFactor = Math.max(0.1, 1 - smoothBlend);
+  
+  // Generate terrain height using LOCAL coordinates (same as TerrainGeometry)
+  const height = fbm(localX * terrainScale, localZ * terrainScale, terrainOctaves) * (terrainHeightMultiplier * heightMultiplierFactor);
+  const mounds = fbm(localX * terrainMoundScale, localZ * terrainMoundScale, 3) * (terrainMoundMultiplier * heightMultiplierFactor);
+  
+  // Return floor top + terrain height
+  return terrainCube.position.y + (terrainCube.scale.y / 2) + height + mounds;
 }
 
 function getGroundHeightXZ(wx, wz) {
@@ -447,6 +546,18 @@ function getGroundHeightXZAtY(wx, wz, worldY) {
             // Only use this height if we're close to or above its top surface
             if (worldY >= topY - PLATFORM_UNDERPASS_THRESHOLD) {
               maxH = Math.max(maxH, cubeHeight);
+            }
+          }
+        }
+        
+        // Check for generated terrain cubes with terrain noise
+        if (cube.isTerrain && cube.hasTerrainNoise) {
+          const generatedTerrainHeight = getGeneratedTerrainHeight(wx, wz, cube);
+          if (generatedTerrainHeight !== null) {
+            const terrainHeightFromGround = generatedTerrainHeight - groundY;
+            // Only use if we're close to or above the terrain surface
+            if (worldY >= generatedTerrainHeight - PLATFORM_UNDERPASS_THRESHOLD) {
+              maxH = Math.max(maxH, terrainHeightFromGround);
             }
           }
         }
@@ -976,22 +1087,49 @@ function buildStairAABBsWorld() {
   try {
     const cubes = CURRENT_PLACED_CUBES || [];
     cubes.forEach((cube, idx) => {
+      // For child collision objects, get live position/scale from parent transform
+      let livePosition = cube.position;
+      let liveScale = cube.scale;
+      
+      if (cube.parentId && window.__CF_PARENT_TRANSFORMS__) {
+        const parentTransform = window.__CF_PARENT_TRANSFORMS__[cube.parentId];
+        if (parentTransform && cube.followParentScale) {
+          // Get live position from parent
+          livePosition = {
+            x: parentTransform.position.x,
+            y: parentTransform.position.y,
+            z: parentTransform.position.z
+          };
+          
+          // Get live scale from parent bounds
+          const parentCube = cubes.find(c => c.id === cube.parentId);
+          if (parentCube && parentCube.modelBounds) {
+            const bounds = parentCube.modelBounds;
+            liveScale = {
+              x: bounds.width * parentTransform.scale.x,
+              y: bounds.height * parentTransform.scale.y,
+              z: bounds.depth * parentTransform.scale.z
+            };
+          }
+        }
+      }
+      
       if (cube.hasCollision) {
         // stairs2 uses makeForPlacedStairs2 - EXACT same as makeFor
         if (cube.modelType === 'stairs2') {
           boxes.push(...makeForPlacedStairs2(cube));
         } else if (cube.shape === 'sphere' || cube.shape === 'cylinder') {
           // Sphere and Cylinder collision - use circular collision logic (like rocket base)
-          const avgScale = ((cube.scale.x || 5) + (cube.scale.y || 5) + (cube.scale.z || 5)) / 3;
+          const avgScale = ((liveScale.x || 5) + (liveScale.y || 5) + (liveScale.z || 5)) / 3;
           const radius = avgScale * 0.5; // sphere/cylinder geometry has radius 0.5
           
           // For cylinders with walkableTop, create TWO boxes: top platform + side walls (ORIGINAL BEHAVIOR)
           if (cube.shape === 'cylinder' && cube.walkableTop) {
-            const radiusXZ = (cube.scale.x || 5) * 0.5; // horizontal radius
-            const height = (cube.scale.y || 5);
-            const centerX = cube.position.x || 0;
-            const centerY = cube.position.y || 0;
-            const centerZ = cube.position.z || 0;
+            const radiusXZ = (liveScale.x || 5) * 0.5; // horizontal radius
+            const height = (liveScale.y || 5);
+            const centerX = livePosition.x || 0;
+            const centerY = livePosition.y || 0;
+            const centerZ = livePosition.z || 0;
             const topY = centerY + height * 0.5;
             const bottomY = centerY - height * 0.5;
             
@@ -1021,9 +1159,9 @@ function buildStairAABBsWorld() {
             });
           } else if (cube.shape === 'sphere') {
             // Sphere: same collision structure as cylinder for walkable top
-            const centerX = cube.position.x || 0;
-            const centerY = cube.position.y || 0;
-            const centerZ = cube.position.z || 0;
+            const centerX = livePosition.x || 0;
+            const centerY = livePosition.y || 0;
+            const centerZ = livePosition.z || 0;
             const sphereRadius = radius;
             
             if (cube.walkableTop) {
@@ -1060,19 +1198,19 @@ function buildStairAABBsWorld() {
             // Non-walkable cylinder: single collision box
             boxes.push({
               min: {
-                x: (cube.position.x || 0) - radius,
-                y: (cube.position.y || 0) - radius,
-                z: (cube.position.z || 0) - radius
+                x: (livePosition.x || 0) - radius,
+                y: (livePosition.y || 0) - radius,
+                z: (livePosition.z || 0) - radius
               },
               max: {
-                x: (cube.position.x || 0) + radius,
-                y: (cube.position.y || 0) + radius,
-                z: (cube.position.z || 0) + radius
+                x: (livePosition.x || 0) + radius,
+                y: (livePosition.y || 0) + radius,
+                z: (livePosition.z || 0) + radius
               },
               idx: 10000 + idx,
               isRocketBase: true, // Use circular collision logic
-              centerX: cube.position.x || 0,
-              centerZ: cube.position.z || 0,
+              centerX: livePosition.x || 0,
+              centerZ: livePosition.z || 0,
               radius: radius,
               isPlacedSphere: true,
               walkableTop: false
@@ -1080,12 +1218,12 @@ function buildStairAABBsWorld() {
           }
         } else {
           // Box collision - exactly like Connect Four table
-          const halfX = (cube.scale.x || 5) / 2;
-          const halfY = (cube.scale.y || 5) / 2;
-          const halfZ = (cube.scale.z || 5) / 2;
-          const centerX = cube.position.x || 0;
-          const centerY = cube.position.y || 0;
-          const centerZ = cube.position.z || 0;
+          const halfX = (liveScale.x || 5) / 2;
+          const halfY = (liveScale.y || 5) / 2;
+          const halfZ = (liveScale.z || 5) / 2;
+          const centerX = livePosition.x || 0;
+          const centerY = livePosition.y || 0;
+          const centerZ = livePosition.z || 0;
           
           // Single box with exact same attributes as Connect Four table
           boxes.push({
@@ -1389,6 +1527,11 @@ function Stairs2PlacedModel({ cube, isSelected, editMode, dragMode, transformMod
   const groupRef = React.useRef();
   const transformRef = React.useRef();
   
+  // Interpolation targets for smooth opponent view
+  const targetPos = React.useRef(new THREE.Vector3());
+  const targetRot = React.useRef(new THREE.Euler());
+  const targetScale = React.useRef(new THREE.Vector3(1, 1, 1));
+  
   // Load textures (same as main Staircase component)
   const stairsTex = useTexture('/textures/metal_stairs.png');
   useEffect(() => {
@@ -1650,6 +1793,12 @@ function Stairs2PlacedModel({ cube, isSelected, editMode, dragMode, transformMod
       const handleMouseUp = () => {
         if (!groupRef.current) return;
         const { position, rotation, scale } = groupRef.current;
+        
+        // Immediately set targets to current position to prevent snap-back
+        targetPos.current.copy(position);
+        targetRot.current.copy(rotation);
+        targetScale.current.copy(scale);
+        
         const updates = {
           position: { x: position.x, y: position.y, z: position.z },
           rotation: { x: rotation.x, y: rotation.y, z: rotation.z },
@@ -1728,6 +1877,11 @@ function AsteroidPlacedModel({ cube, isSelected, editMode, dragMode, transformMo
   const transformRef = React.useRef();
   const asteroidModel = useFBX('/models/props/asteroid/asteroid.fbx');
   
+  // Interpolation targets for smooth opponent view
+  const targetPos = React.useRef(new THREE.Vector3());
+  const targetRot = React.useRef(new THREE.Euler());
+  const targetScale = React.useRef(new THREE.Vector3(1, 1, 1));
+  
   const modelClone = React.useMemo(() => {
     if (!asteroidModel) return null;
     // Create a new group and only copy meshes (no bones/skeleton)
@@ -1760,6 +1914,12 @@ function AsteroidPlacedModel({ cube, isSelected, editMode, dragMode, transformMo
       const handleMouseUp = () => {
         if (!groupRef.current) return;
         const { position, rotation, scale } = groupRef.current;
+        
+        // Immediately set targets to current position to prevent snap-back
+        targetPos.current.copy(position);
+        targetRot.current.copy(rotation);
+        targetScale.current.copy(scale);
+        
         const updates = {
           position: { x: position.x, y: position.y, z: position.z },
           rotation: { x: rotation.x, y: rotation.y, z: rotation.z },
@@ -1826,11 +1986,357 @@ function AsteroidPlacedModel({ cube, isSelected, editMode, dragMode, transformMo
   );
 }
 
+// Component for rendering rover models
+function RoverPlacedModel({ cube, isSelected, editMode, dragMode, transformMode, snap, translateSnap, rotateSnapDeg, scaleSnap, onTransformEnd }) {
+  const groupRef = React.useRef();
+  const transformRef = React.useRef();
+  const roverModel = useFBX('/models/props/rover/dusty rover/Dusty_Explorer_1020195240_texture.fbx');
+  
+  // Interpolation targets for smooth opponent view
+  const targetPos = React.useRef(new THREE.Vector3());
+  const targetRot = React.useRef(new THREE.Euler());
+  const targetScale = React.useRef(new THREE.Vector3(1, 1, 1));
+  
+  const modelClone = React.useMemo(() => {
+    if (!roverModel) return null;
+    // Create a new group and only copy meshes (no bones/skeleton)
+    const group = new THREE.Group();
+    roverModel.traverse(o => {
+      if (o.isMesh || o.isSkinnedMesh) {
+        // Convert SkinnedMesh to regular Mesh to avoid bone issues
+        const geometry = o.geometry;
+        const material = o.material;
+        
+        // Create a plain Mesh (not SkinnedMesh)
+        const mesh = new THREE.Mesh(geometry, material);
+        mesh.castShadow = true;
+        mesh.receiveShadow = true;
+        
+        // Copy world transform
+        mesh.position.copy(o.position);
+        mesh.rotation.copy(o.rotation);
+        mesh.scale.copy(o.scale);
+        
+        group.add(mesh);
+      }
+    });
+    return group;
+  }, [roverModel]);
+  
+  React.useEffect(() => {
+    if (transformRef.current && groupRef.current) {
+      const controls = transformRef.current;
+      const handleMouseUp = () => {
+        if (!groupRef.current) return;
+        const { position, rotation, scale } = groupRef.current;
+        
+        // Immediately set targets to current position to prevent snap-back
+        targetPos.current.copy(position);
+        targetRot.current.copy(rotation);
+        targetScale.current.copy(scale);
+        
+        const updates = {
+          position: { x: position.x, y: position.y, z: position.z },
+          rotation: { x: rotation.x, y: rotation.y, z: rotation.z },
+          scale: { x: scale.x, y: scale.y, z: scale.z }
+        };
+        if (onTransformEnd) onTransformEnd(updates);
+      };
+      controls.addEventListener('mouseUp', handleMouseUp);
+      return () => controls.removeEventListener('mouseUp', handleMouseUp);
+    }
+  }, [onTransformEnd]);
+  
+  React.useEffect(() => {
+    if (transformRef.current) {
+      transformRef.current.setMode(transformMode);
+      transformRef.current.setTranslationSnap(snap ? translateSnap : null);
+      transformRef.current.setRotationSnap(snap ? (rotateSnapDeg * Math.PI / 180) : null);
+      transformRef.current.setScaleSnap(snap ? scaleSnap : null);
+    }
+  }, [transformMode, snap, translateSnap, rotateSnapDeg, scaleSnap]);
+  
+  if (!modelClone) return null;
+  
+  return (
+    <>
+      {dragMode && editMode ? (
+        // Wrap in DraggableObject for free drag mode
+        <DraggableObject cube={cube} editMode={editMode} dragMode={dragMode} isSelected={isSelected} onDragEnd={onTransformEnd}>
+          <group
+            ref={groupRef}
+            rotation={[cube.rotation.x, cube.rotation.y, cube.rotation.z]}
+            scale={[cube.scale.x, cube.scale.y, cube.scale.z]}
+          >
+            <primitive object={modelClone} />
+            {cube.hasCollision && (
+              <mesh>
+                <boxGeometry args={[1, 1, 1]} />
+                <meshBasicMaterial color={isSelected ? '#10b981' : '#3b82f6'} wireframe opacity={0.3} transparent />
+              </mesh>
+            )}
+          </group>
+        </DraggableObject>
+      ) : (
+        <group
+          ref={groupRef}
+          position={[cube.position.x, cube.position.y, cube.position.z]}
+          rotation={[cube.rotation.x, cube.rotation.y, cube.rotation.z]}
+          scale={[cube.scale.x, cube.scale.y, cube.scale.z]}
+        >
+          <primitive object={modelClone} />
+          {cube.hasCollision && editMode && (
+            <mesh>
+              <boxGeometry args={[1, 1, 1]} />
+              <meshBasicMaterial color={isSelected ? '#10b981' : '#3b82f6'} wireframe opacity={0.3} transparent />
+            </mesh>
+          )}
+        </group>
+      )}
+      {/* Always show TransformControls when selected, even in drag mode */}
+      {isSelected && editMode && groupRef.current && (
+        <TransformControls ref={transformRef} object={groupRef.current} mode={transformMode} enabled={!dragMode} />
+      )}
+    </>
+  );
+}
+
+// Component for rendering custom uploaded models (dynamic path)
+function CustomPlacedModel({ cube, isSelected, onSelect, editMode, dragMode, transformMode, snap, translateSnap, rotateSnapDeg, scaleSnap, onTransformEnd, showCollisionMeshes }) {
+  const groupRef = React.useRef();
+  const transformRef = React.useRef();
+  const isDragging = React.useRef(false); // Track if this model is currently being dragged
+  
+  // Store parent transform reference globally so children can access it
+  React.useEffect(() => {
+    if (!window.__CF_PARENT_TRANSFORMS__) {
+      window.__CF_PARENT_TRANSFORMS__ = {};
+    }
+    if (groupRef.current) {
+      window.__CF_PARENT_TRANSFORMS__[cube.id] = groupRef.current;
+    }
+    return () => {
+      if (window.__CF_PARENT_TRANSFORMS__) {
+        delete window.__CF_PARENT_TRANSFORMS__[cube.id];
+      }
+    };
+  }, [cube.id]);
+  
+  // Dynamically load model based on cube.customModelPath
+  const modelPath = cube.customModelPath || '';
+  const modelExtension = modelPath.toLowerCase().split('.').pop();
+  
+  // Load FBX models
+  const fbxModel = useFBX(modelExtension === 'fbx' ? modelPath : null);
+  // For other formats (GLB, GLTF, etc.), we'd use useGLTF or useLoader
+  // For now, focusing on FBX support like the other models
+  
+  const modelClone = React.useMemo(() => {
+    if (!fbxModel) return null;
+    const group = new THREE.Group();
+    fbxModel.traverse(o => {
+      if (o.isMesh || o.isSkinnedMesh) {
+        const geometry = o.geometry;
+        const material = o.material;
+        const mesh = new THREE.Mesh(geometry, material);
+        mesh.castShadow = true;
+        mesh.receiveShadow = true;
+        mesh.position.copy(o.position);
+        mesh.rotation.copy(o.rotation);
+        mesh.scale.copy(o.scale);
+        group.add(mesh);
+      }
+    });
+    return group;
+  }, [fbxModel]);
+  
+  // Calculate actual model bounding box dimensions
+  const modelBounds = React.useMemo(() => {
+    if (!modelClone) return { width: 1, height: 1, depth: 1 };
+    const box = new THREE.Box3().setFromObject(modelClone);
+    const size = new THREE.Vector3();
+    box.getSize(size);
+    // These are the raw model dimensions BEFORE scaling
+    return { 
+      width: size.x || 1, 
+      height: size.y || 1, 
+      depth: size.z || 1 
+    };
+  }, [modelClone]);
+  
+  // Store bounds on cube for UI to use (only once when model loads)
+  React.useEffect(() => {
+    if (modelBounds && cube && !cube.modelBounds) {
+      // Update the cube with its bounds so UI can spawn proper collision
+      if (onTransformEnd) {
+        onTransformEnd({ modelBounds });
+      }
+    }
+  }, [modelBounds, cube, onTransformEnd]);
+  
+  React.useEffect(() => {
+    // Only set position directly from state when NOT dragging (prevents fighting with TransformControls)
+    if (groupRef.current && cube && !isDragging.current) {
+      // Set targets for interpolation instead of direct position
+      targetPos.current.set(cube.position.x, cube.position.y, cube.position.z);
+      targetRot.current.set(cube.rotation.x, cube.rotation.y, cube.rotation.z);
+      targetScale.current.set(cube.scale.x, cube.scale.y, cube.scale.z);
+    }
+  }, [cube]);
+  
+  // SMOOTH INTERPOLATION for opponent's view when they see live updates
+  // Store target transform and lerp toward it each frame
+  const targetPos = React.useRef(new THREE.Vector3());
+  const targetRot = React.useRef(new THREE.Euler());
+  const targetScale = React.useRef(new THREE.Vector3(1, 1, 1));
+  
+  // Initialize targets on first mount
+  React.useEffect(() => {
+    if (cube && groupRef.current) {
+      targetPos.current.set(cube.position.x, cube.position.y, cube.position.z);
+      targetRot.current.set(cube.rotation.x, cube.rotation.y, cube.rotation.z);
+      targetScale.current.set(cube.scale.x, cube.scale.y, cube.scale.z);
+      // Set initial position directly
+      groupRef.current.position.set(cube.position.x, cube.position.y, cube.position.z);
+      groupRef.current.rotation.set(cube.rotation.x, cube.rotation.y, cube.rotation.z);
+      groupRef.current.scale.set(cube.scale.x, cube.scale.y, cube.scale.z);
+    }
+  }, [cube.id]); // Only on mount/cube change
+  
+  // Smooth interpolation for opponent viewing your transforms
+  useFrame((_, delta) => {
+    if (!groupRef.current || isDragging.current) return; // Skip if you're dragging it
+    
+    // Super smooth interpolation - high factor for responsive feel
+    const lerpFactor = Math.min(1, delta * 50);
+    
+    // Lerp position
+    groupRef.current.position.lerp(targetPos.current, lerpFactor);
+    
+    // Lerp rotation
+    groupRef.current.rotation.x += (targetRot.current.x - groupRef.current.rotation.x) * lerpFactor;
+    groupRef.current.rotation.y += (targetRot.current.y - groupRef.current.rotation.y) * lerpFactor;
+    groupRef.current.rotation.z += (targetRot.current.z - groupRef.current.rotation.z) * lerpFactor;
+    
+    // Lerp scale
+    groupRef.current.scale.lerp(targetScale.current, lerpFactor);
+  });
+  
+  // Main model transform controls
+  React.useEffect(() => {
+    if (!transformRef.current) return;
+    const controls = transformRef.current;
+    
+    const onDraggingChanged = (event) => {
+      isDragging.current = event.value; // Track drag state
+      
+      // Notify parent component about drag state
+      if (window.__CF_SET_DRAGGING_CUBE__) {
+        window.__CF_SET_DRAGGING_CUBE__(event.value);
+      }
+      
+      if (!event.value) {
+        // Drag ended - send final transform
+        if (!groupRef.current || !onTransformEnd) return;
+        const pos = groupRef.current.position;
+        const rot = groupRef.current.rotation;
+        const scl = groupRef.current.scale;
+        
+        // Immediately set targets to current position to prevent snap-back
+        targetPos.current.copy(pos);
+        targetRot.current.copy(rot);
+        targetScale.current.copy(scl);
+        
+        onTransformEnd({
+          position: { x: pos.x, y: pos.y, z: pos.z },
+          rotation: { x: rot.x, y: rot.y, z: rot.z },
+          scale: { x: scl.x, y: scl.y, z: scl.z }
+        });
+      }
+    };
+    
+    controls.addEventListener('dragging-changed', onDraggingChanged);
+    
+    return () => {
+      if (controls && controls.removeEventListener) {
+        controls.removeEventListener('dragging-changed', onDraggingChanged);
+      }
+    };
+  }, [onTransformEnd]);
+  
+  // LIVE TRANSFORM BROADCAST - Send position/rotation/scale to opponent in real-time while dragging
+  const lastBroadcastRef = React.useRef(0);
+  useFrame(() => {
+    if (!isDragging.current || !groupRef.current) return;
+    
+    // Throttle broadcasts to ~30fps (every ~33ms) to avoid overwhelming the network
+    const now = performance.now();
+    if (now - lastBroadcastRef.current < 33) return;
+    lastBroadcastRef.current = now;
+    
+    // Broadcast live transform to opponent
+    if (onTransformEnd) {
+      const pos = groupRef.current.position;
+      const rot = groupRef.current.rotation;
+      const scl = groupRef.current.scale;
+      onTransformEnd({
+        position: { x: pos.x, y: pos.y, z: pos.z },
+        rotation: { x: rot.x, y: rot.y, z: rot.z },
+        scale: { x: scl.x, y: scl.y, z: scl.z },
+        isLive: true // Flag to indicate this is a live update, not final
+      });
+    }
+  });
+  
+  React.useEffect(() => {
+    if (transformRef.current) {
+      transformRef.current.setTranslationSnap(snap && translateSnap ? translateSnap : null);
+      transformRef.current.setRotationSnap(snap && rotateSnapDeg ? THREE.MathUtils.degToRad(rotateSnapDeg) : null);
+      transformRef.current.setScaleSnap(snap && scaleSnap ? scaleSnap : null);
+    }
+  }, [snap, translateSnap, rotateSnapDeg, scaleSnap]);
+  
+  if (!modelClone) return null;
+  
+  return (
+    <>
+      {dragMode && !isSelected ? (
+        <DraggableObject initialPosition={cube.position} onDragEnd={onTransformEnd}>
+          <group ref={groupRef} onClick={(e) => { e.stopPropagation(); if (onSelect) onSelect(); }}>
+            <primitive object={modelClone} />
+          </group>
+        </DraggableObject>
+      ) : (
+        <group ref={groupRef} onClick={(e) => { e.stopPropagation(); if (onSelect && editMode) onSelect(); }}>
+          <primitive object={modelClone} />
+          
+          {isSelected && editMode && (
+            <mesh visible={false}>
+              <boxGeometry args={[1, 1, 1]} />
+              <meshBasicMaterial color={isSelected ? '#10b981' : '#3b82f6'} wireframe opacity={0.3} transparent />
+            </mesh>
+          )}
+        </group>
+      )}
+      
+      {/* Main model transform controls */}
+      {isSelected && editMode && groupRef.current && (
+        <TransformControls ref={transformRef} object={groupRef.current} mode={transformMode} enabled={!dragMode} />
+      )}
+    </>
+  );
+}
+
 // Component for rendering table models
 function TablePlacedModel({ cube, isSelected, editMode, dragMode, transformMode, snap, translateSnap, rotateSnapDeg, scaleSnap, onTransformEnd }) {
   const groupRef = React.useRef();
   const transformRef = React.useRef();
   const tableModel = useFBX('/models/props/table/table.fbx');
+  
+  // Interpolation targets for smooth opponent view
+  const targetPos = React.useRef(new THREE.Vector3());
+  const targetRot = React.useRef(new THREE.Euler());
+  const targetScale = React.useRef(new THREE.Vector3(1, 1, 1));
   
   const modelClone = React.useMemo(() => {
     if (!tableModel) return null;
@@ -1850,6 +2356,12 @@ function TablePlacedModel({ cube, isSelected, editMode, dragMode, transformMode,
       const handleMouseUp = () => {
         if (!groupRef.current) return;
         const { position, rotation, scale } = groupRef.current;
+        
+        // Immediately set targets to current position to prevent snap-back
+        targetPos.current.copy(position);
+        targetRot.current.copy(rotation);
+        targetScale.current.copy(scale);
+        
         const updates = {
           position: { x: position.x, y: position.y, z: position.z },
           rotation: { x: rotation.x, y: rotation.y, z: rotation.z },
@@ -1916,33 +2428,756 @@ function TablePlacedModel({ cube, isSelected, editMode, dragMode, transformMode,
   );
 }
 
-function PlacedCube({ cube, isSelected, editMode, dragMode, transformMode, snap, translateSnap, rotateSnapDeg, scaleSnap, onTransformEnd, showCollisionMeshes }) {
+// Terrain Sculpting Tool - displays brush cursor and handles sculpting interactions
+function TerrainSculptor({ enabled, brushSize, strength, placedCubes, onSculpt }) {
+  const { camera, raycaster, scene, gl } = useThree();
+  const [brushPosition, setBrushPosition] = useState(null);
+  const [hoveredTerrainId, setHoveredTerrainId] = useState(null);
+  const mouseRef = useRef(new THREE.Vector2(0, 0));
+
+  // Track mouse movement
+  useEffect(() => {
+    if (!enabled) return;
+
+    const canvas = gl.domElement;
+    
+    const handleMouseMove = (event) => {
+      const rect = canvas.getBoundingClientRect();
+      
+      // Convert to normalized device coordinates (-1 to +1)
+      mouseRef.current.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
+      mouseRef.current.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
+    };
+
+    canvas.addEventListener('mousemove', handleMouseMove);
+    return () => canvas.removeEventListener('mousemove', handleMouseMove);
+  }, [enabled, gl]);
+
+  useFrame(() => {
+    if (!enabled) {
+      setBrushPosition(null);
+      return;
+    }
+
+    raycaster.setFromCamera(mouseRef.current, camera);
+    
+    // Find terrain meshes
+    const terrainObjects = [];
+    scene.traverse((obj) => {
+      if (obj.isMesh && obj.userData.terrainId) {
+        terrainObjects.push(obj);
+      }
+    });
+
+    const intersects = raycaster.intersectObjects(terrainObjects, false);
+    
+    if (intersects.length > 0) {
+      const hit = intersects[0];
+      const newPos = hit.point.clone();
+      
+      // Only update if position changed significantly (prevent jitter from geometry updates)
+      if (!brushPosition || brushPosition.distanceTo(newPos) > 0.1) {
+        setBrushPosition(newPos);
+      }
+      setHoveredTerrainId(hit.object.userData.terrainId);
+    } else {
+      setBrushPosition(null);
+      setHoveredTerrainId(null);
+    }
+  });
+
+  // Handle arrow keys for sculpting
+  useEffect(() => {
+    if (!enabled) return;
+
+    const handleKeyDown = (e) => {
+      if (hoveredTerrainId && brushPosition) {
+        if (e.key === ']') {
+          e.preventDefault();
+          onSculpt(hoveredTerrainId, brushPosition, brushSize, strength);
+        } else if (e.key === '[') {
+          e.preventDefault();
+          onSculpt(hoveredTerrainId, brushPosition, brushSize, -strength);
+        }
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [enabled, hoveredTerrainId, brushPosition, brushSize, strength, onSculpt]);
+
+  if (!enabled || !brushPosition) return null;
+
+  return (
+    <mesh position={[brushPosition.x, brushPosition.y + 0.1, brushPosition.z]} rotation={[-Math.PI / 2, 0, 0]}>
+      <ringGeometry args={[brushSize * 0.9, brushSize, 32]} />
+      <meshBasicMaterial color="#00ff00" transparent opacity={0.5} side={THREE.DoubleSide} />
+    </mesh>
+  );
+}
+
+// Terrain geometry generator with procedural noise
+function TerrainGeometry({ cube }) {
+  const geometry = React.useMemo(() => {
+    const segments = cube.terrainSegments || 100;
+    const sizeX = cube.scale.x;
+    const sizeZ = cube.scale.z;
+    
+    const geo = new THREE.PlaneGeometry(sizeX, sizeZ, segments, segments);
+    
+    // Get position attribute
+    const positions = geo.attributes.position;
+    
+    // Heightmap function using noise
+    const hash21 = (x, y) => {
+      let n = Math.sin(x * 127.1 + y * 311.7) * 43758.5453123;
+      return n - Math.floor(n);
+    };
+    
+    const noise = (x, y) => {
+      const ix = Math.floor(x);
+      const iy = Math.floor(y);
+      const fx = x - ix;
+      const fy = y - iy;
+      
+      const a = hash21(ix, iy);
+      const b = hash21(ix + 1, iy);
+      const c = hash21(ix, iy + 1);
+      const d = hash21(ix + 1, iy + 1);
+      
+      const ux = fx * fx * (3 - 2 * fx);
+      const uy = fy * fy * (3 - 2 * fy);
+      
+      return a * (1 - ux) * (1 - uy) +
+             b * ux * (1 - uy) +
+             c * (1 - ux) * uy +
+             d * ux * uy;
+    };
+    
+    const fbm = (x, y, octaves) => {
+      let value = 0;
+      let amplitude = 1;
+      let frequency = 1;
+      
+      for (let i = 0; i < octaves; i++) {
+        value += amplitude * noise(x * frequency, y * frequency);
+        frequency *= 2.0;
+        amplitude *= 0.5;
+      }
+      
+      return value;
+    };
+    
+    // Apply height to vertices
+    const terrainScale = cube.terrainScale || 0.015;
+    const terrainHeightMultiplier = cube.terrainHeightMultiplier || 8;
+    const terrainMoundScale = cube.terrainMoundScale || 0.008;
+    const terrainMoundMultiplier = cube.terrainMoundMultiplier || 15;
+    const terrainOctaves = cube.terrainOctaves || 4;
+    const edgeBlendPercent = cube.terrainEdgeBlend || 0.25; // Default 25% of edge
+    
+    // Calculate max distance from center to edge (for edge blending)
+    const maxDistX = sizeX / 2;
+    const maxDistZ = sizeZ / 2;
+    
+    // Check if this cube has snapped edges
+    // Either this cube is snapped to another (cube.snappedEdge)
+    // OR another cube is snapped to this one (check all cubes)
+    const edgesToSkipBlending = [];
+    
+    // Add this cube's snapped edge
+    if (cube.snappedEdge) {
+      edgesToSkipBlending.push(cube.snappedEdge);
+    }
+    
+    // Find the target cube if this cube is snapped to another
+    let targetCube = null;
+    if (cube.snappedTo && typeof CURRENT_PLACED_CUBES !== 'undefined') {
+      targetCube = CURRENT_PLACED_CUBES.find(c => c.id === cube.snappedTo);
+    }
+    
+    // Check if any other cube is snapped to this one
+    if (typeof CURRENT_PLACED_CUBES !== 'undefined') {
+      for (const otherCube of CURRENT_PLACED_CUBES) {
+        if (otherCube.snappedTo === cube.id && otherCube.snappedEdge) {
+          // Figure out which of THIS cube's edges the other cube is snapped to
+          // If other cube's north is snapped, it's touching our south (and vice versa)
+          const edgeMapping = {
+            'north': 'south',
+            'south': 'north',
+            'east': 'west',
+            'west': 'east'
+          };
+          const correspondingEdge = edgeMapping[otherCube.snappedEdge];
+          if (correspondingEdge && !edgesToSkipBlending.includes(correspondingEdge)) {
+            edgesToSkipBlending.push(correspondingEdge);
+          }
+        }
+      }
+    }
+    
+    // Helper function to get terrain height from target cube's edge at a world position
+    const getTargetEdgeHeight = (worldX, worldZ, targetCube, targetEdge) => {
+      if (!targetCube || !targetCube.hasTerrainNoise) return 0;
+      
+      // Transform world position to target cube's local space
+      const dx = worldX - targetCube.position.x;
+      const dz = worldZ - targetCube.position.z;
+      
+      const cosY = Math.cos(-targetCube.rotation.y);
+      const sinY = Math.sin(-targetCube.rotation.y);
+      
+      let localX = dx * cosY - dz * sinY;
+      let localZ = dx * sinY + dz * cosY;
+      
+      // Get target's dimensions
+      const tSizeX = targetCube.scale.x;
+      const tSizeZ = targetCube.scale.z;
+      
+      // Force ONLY the perpendicular coordinate to be at the target's edge
+      if (targetEdge === 'north' || targetEdge === 'south') {
+        localZ = targetEdge === 'north' ? (tSizeZ / 2) : (-tSizeZ / 2);
+      } else {
+        localX = targetEdge === 'east' ? (tSizeX / 2) : (-tSizeX / 2);
+      }
+      
+      // CRITICAL: Use world-space coordinates for noise sampling
+      // This ensures BOTH edges sample the SAME noise pattern at the connection point
+      // Sample using world coordinates directly - this creates the shared terrain
+      const tScale = 0.015; // Use consistent scale for shared edge
+      const tHeightMult = 8;
+      const tMoundScale = 0.008;
+      const tMoundMult = 15;
+      const tOctaves = 4;
+      
+      // Sample noise in WORLD SPACE so both edges get identical values
+      const height = fbm(worldX * tScale, worldZ * tScale, tOctaves) * tHeightMult;
+      const mounds = fbm(worldX * tMoundScale, worldZ * tMoundScale, 3) * tMoundMult;
+      
+      return height + mounds;
+    };
+    
+    for (let i = 0; i < positions.count; i++) {
+      const x = positions.getX(i);
+      const z = -positions.getY(i);
+      
+      // Transform to world position (apply rotation and position, x/z are already in world-scale from PlaneGeometry)
+      const cosY = Math.cos(cube.rotation.y);
+      const sinY = Math.sin(cube.rotation.y);
+      const worldX = cube.position.x + (x * cosY - z * sinY);
+      const worldZ = cube.position.z + (x * sinY + z * cosY);
+      
+      // Calculate normalized distance from edges in each axis (0 at center, 1 at edge)
+      // This creates an elliptical blend that scales with floor dimensions
+      const normalizedX = Math.abs(x) / maxDistX; // 0 to 1 (center to edge X)
+      const normalizedZ = Math.abs(z) / maxDistZ; // 0 to 1 (center to edge Z)
+      
+      // Determine which edges should blend based on snapped state
+      let shouldBlendX = true;
+      let shouldBlendZ = true;
+      let matchTargetEdge = null;
+      let worldSpaceEdges = []; // Track which specific edges should use world-space noise
+      
+      // Check each edge that should skip blending
+      for (const edge of edgesToSkipBlending) {
+        if (edge === 'north' && z > 0) {
+          shouldBlendZ = false;
+          if (edge === cube.snappedEdge && targetCube) {
+            matchTargetEdge = edge;
+            worldSpaceEdges.push(edge);
+          } else if (edgesToSkipBlending.includes(edge)) {
+            // This edge has another cube snapped to it - use world-space noise
+            worldSpaceEdges.push(edge);
+          }
+        } else if (edge === 'south' && z < 0) {
+          shouldBlendZ = false;
+          if (edge === cube.snappedEdge && targetCube) {
+            matchTargetEdge = edge;
+            worldSpaceEdges.push(edge);
+          } else if (edgesToSkipBlending.includes(edge)) {
+            worldSpaceEdges.push(edge);
+          }
+        } else if (edge === 'east' && x > 0) {
+          shouldBlendX = false;
+          if (edge === cube.snappedEdge && targetCube) {
+            matchTargetEdge = edge;
+            worldSpaceEdges.push(edge);
+          } else if (edgesToSkipBlending.includes(edge)) {
+            worldSpaceEdges.push(edge);
+          }
+        } else if (edge === 'west' && x < 0) {
+          shouldBlendX = false;
+          if (edge === cube.snappedEdge && targetCube) {
+            matchTargetEdge = edge;
+            worldSpaceEdges.push(edge);
+          } else if (edgesToSkipBlending.includes(edge)) {
+            worldSpaceEdges.push(edge);
+          }
+        }
+      }
+      
+      // Calculate blend for each axis independently
+      let blendX = 0, blendZ = 0;
+      
+      if (shouldBlendX) {
+        const blendZoneX = Math.max(0, Math.min(1, (normalizedX - (1 - edgeBlendPercent)) / edgeBlendPercent));
+        blendX = blendZoneX * blendZoneX * (3 - 2 * blendZoneX); // Smoothstep
+      }
+      
+      if (shouldBlendZ) {
+        const blendZoneZ = Math.max(0, Math.min(1, (normalizedZ - (1 - edgeBlendPercent)) / edgeBlendPercent));
+        blendZ = blendZoneZ * blendZoneZ * (3 - 2 * blendZoneZ); // Smoothstep
+      }
+      
+      // Use the maximum blend factor (most edge-like)
+      const smoothBlend = Math.max(blendX, blendZ);
+      
+      // Height multiplier factor: 1 = full multiplier (center), near 0 but not 0 (edge)
+      // Keep some minimum so terrain detail exists at edges (0.1 = 10% of normal height)
+      const heightMultiplierFactor = Math.max(0.1, 1 - smoothBlend);
+      
+      // Generate hills and mounds with reduced multiplier at edges (keeps detail, reduces amplitude)
+      const height = fbm(x * terrainScale, z * terrainScale, terrainOctaves) * (terrainHeightMultiplier * heightMultiplierFactor);
+      const mounds = fbm(x * terrainMoundScale, z * terrainMoundScale, 3) * (terrainMoundMultiplier * heightMultiplierFactor);
+      
+      let finalHeight = height + mounds;
+      
+      // If this vertex is on a snapped edge, use world-space noise for seamless connection
+      if (worldSpaceEdges.length > 0) {
+        // Determine if this vertex is within a snapped edge blend zone
+        let edgeBlendFactor = 0;
+        let onSnappedEdge = false;
+        
+        // Check if on north edge
+        if (worldSpaceEdges.includes('north') && z > 0 && normalizedZ > (1 - edgeBlendPercent)) {
+          const distFromBlendStart = Math.max(0, normalizedZ - (1 - edgeBlendPercent));
+          edgeBlendFactor = distFromBlendStart / edgeBlendPercent;
+          onSnappedEdge = true;
+        }
+        // Check if on south edge
+        else if (worldSpaceEdges.includes('south') && z < 0 && normalizedZ > (1 - edgeBlendPercent)) {
+          const distFromBlendStart = Math.max(0, normalizedZ - (1 - edgeBlendPercent));
+          edgeBlendFactor = distFromBlendStart / edgeBlendPercent;
+          onSnappedEdge = true;
+        }
+        // Check if on east edge
+        else if (worldSpaceEdges.includes('east') && x > 0 && normalizedX > (1 - edgeBlendPercent)) {
+          const distFromBlendStart = Math.max(0, normalizedX - (1 - edgeBlendPercent));
+          edgeBlendFactor = distFromBlendStart / edgeBlendPercent;
+          onSnappedEdge = true;
+        }
+        // Check if on west edge
+        else if (worldSpaceEdges.includes('west') && x < 0 && normalizedX > (1 - edgeBlendPercent)) {
+          const distFromBlendStart = Math.max(0, normalizedX - (1 - edgeBlendPercent));
+          edgeBlendFactor = distFromBlendStart / edgeBlendPercent;
+          onSnappedEdge = true;
+        }
+        
+        // If on a snapped edge, use world-space noise
+        if (onSnappedEdge && edgeBlendFactor > 0) {
+          // Use world-space coordinates for noise sampling - SAME for both terrains!
+          const worldHeight = fbm(worldX * 0.015, worldZ * 0.015, 4) * 8;
+          const worldMounds = fbm(worldX * 0.008, worldZ * 0.008, 3) * 15;
+          const worldTerrainHeight = worldHeight + worldMounds;
+          
+          // Blend from own terrain to world-space terrain at edge
+          const smoothFactor = edgeBlendFactor * edgeBlendFactor * (3 - 2 * edgeBlendFactor);
+          finalHeight = finalHeight * (1 - smoothFactor) + worldTerrainHeight * smoothFactor;
+        }
+      }
+      
+      // Apply sculpting modifications
+      if (cube.heightModifications && cube.heightModifications.length > 0) {
+        // Use local coordinates (x, z are already in local space)
+        for (const mod of cube.heightModifications) {
+          const dx = x - mod.x;
+          const dz = z - mod.z;
+          const distance = Math.sqrt(dx * dx + dz * dz);
+          
+          if (distance < mod.radius) {
+            // Smooth falloff using smoothstep
+            const falloff = 1 - (distance / mod.radius);
+            const smoothFalloff = falloff * falloff * (3 - 2 * falloff);
+            const heightChange = mod.delta * smoothFalloff;
+            finalHeight += heightChange;
+          }
+        }
+      }
+      
+      // Apply combined height
+      positions.setZ(i, finalHeight);
+    }
+    
+    geo.computeVertexNormals();
+    return geo;
+  }, [
+    cube.scale.x, 
+    cube.scale.z, 
+    cube.terrainSegments, 
+    cube.terrainScale, 
+    cube.terrainHeightMultiplier,
+    cube.terrainMoundScale,
+    cube.terrainMoundMultiplier,
+    cube.terrainOctaves,
+    cube.terrainEdgeBlend,
+    cube.snappedEdge,
+    JSON.stringify(cube.heightModifications || []), // Serialize for proper dependency tracking
+    // Regenerate when any cube's snap state changes (to update edges when others snap to this cube)
+    CURRENT_PLACED_CUBES.map(c => c.snappedTo + c.snappedEdge).join(',')
+  ]);
+  
+  return <primitive object={geometry} attach="geometry" />;
+}
+
+// Edge snapping helper for terrain floors
+// Snaps one edge to align with target edge, but allows sliding along that edge
+function detectEdgeSnap(movingCube, allCubes, snapDistance = 2.0) {
+  if (!movingCube.isTerrain) return null;
+  
+  const snapThreshold = snapDistance;
+  const movingHalfX = movingCube.scale.x / 2;
+  const movingHalfZ = movingCube.scale.z / 2;
+  
+  // Calculate moving cube's edge center positions and directions
+  const cosY = Math.cos(movingCube.rotation.y);
+  const sinY = Math.sin(movingCube.rotation.y);
+  
+  // Edge centers and their perpendicular direction vectors
+  const movingEdges = {
+    north: { 
+      center: { x: movingCube.position.x + movingHalfZ * sinY, z: movingCube.position.z + movingHalfZ * cosY },
+      perpDir: { x: sinY, z: cosY } // Direction perpendicular to edge (outward normal)
+    },
+    south: { 
+      center: { x: movingCube.position.x - movingHalfZ * sinY, z: movingCube.position.z - movingHalfZ * cosY },
+      perpDir: { x: -sinY, z: -cosY }
+    },
+    east: { 
+      center: { x: movingCube.position.x + movingHalfX * cosY, z: movingCube.position.z - movingHalfX * sinY },
+      perpDir: { x: cosY, z: -sinY }
+    },
+    west: { 
+      center: { x: movingCube.position.x - movingHalfX * cosY, z: movingCube.position.z + movingHalfX * sinY },
+      perpDir: { x: -cosY, z: sinY }
+    }
+  };
+  
+  // Check against all other terrain cubes
+  for (const targetCube of allCubes) {
+    if (!targetCube.isTerrain || targetCube.id === movingCube.id) continue;
+    
+    const targetHalfX = targetCube.scale.x / 2;
+    const targetHalfZ = targetCube.scale.z / 2;
+    const targetCosY = Math.cos(targetCube.rotation.y);
+    const targetSinY = Math.sin(targetCube.rotation.y);
+    
+    const targetEdges = {
+      north: { 
+        center: { x: targetCube.position.x + targetHalfZ * targetSinY, z: targetCube.position.z + targetHalfZ * targetCosY },
+        perpDir: { x: targetSinY, z: targetCosY }
+      },
+      south: { 
+        center: { x: targetCube.position.x - targetHalfZ * targetSinY, z: targetCube.position.z - targetHalfZ * targetCosY },
+        perpDir: { x: -targetSinY, z: -targetCosY }
+      },
+      east: { 
+        center: { x: targetCube.position.x + targetHalfX * targetCosY, z: targetCube.position.z - targetHalfX * targetSinY },
+        perpDir: { x: targetCosY, z: -targetSinY }
+      },
+      west: { 
+        center: { x: targetCube.position.x - targetHalfX * targetCosY, z: targetCube.position.z + targetHalfX * targetSinY },
+        perpDir: { x: -targetCosY, z: targetSinY }
+      }
+    };
+    
+    // Check all edge combinations for proximity
+    const edgePairs = [
+      ['north', 'south'], ['south', 'north'],
+      ['east', 'west'], ['west', 'east']
+    ];
+    
+    for (const [movingEdgeName, targetEdgeName] of edgePairs) {
+      const movingEdge = movingEdges[movingEdgeName];
+      const targetEdge = targetEdges[targetEdgeName];
+      
+      // Calculate perpendicular distance from moving edge to target edge
+      // Vector from target edge to moving edge
+      const dx = movingEdge.center.x - targetEdge.center.x;
+      const dz = movingEdge.center.z - targetEdge.center.z;
+      
+      // Project onto target edge's perpendicular direction (distance perpendicular to edge)
+      const perpDistance = Math.abs(dx * targetEdge.perpDir.x + dz * targetEdge.perpDir.z);
+      
+      if (perpDistance < snapThreshold) {
+        // Snap: move only in the perpendicular direction to align edges
+        // Calculate how much to move perpendicular to make edges flush
+        const snapOffset = perpDistance * (dx * targetEdge.perpDir.x + dz * targetEdge.perpDir.z > 0 ? -1 : 1);
+        
+        return {
+          targetCubeId: targetCube.id,
+          movingEdge: movingEdgeName,
+          targetEdge: targetEdgeName,
+          snapOffset: {
+            x: snapOffset * targetEdge.perpDir.x,
+            z: snapOffset * targetEdge.perpDir.z
+          },
+          perpDistance
+        };
+      }
+    }
+  }
+  
+  return null;
+}
+
+// AI Content Renderer - converts structured data to Three.js meshes
+function AIContentRenderer({ contentData, boxScale, position, rotation }) {
+  console.log('[AIContentRenderer] Called with:', { contentData, boxScale, position, rotation });
+  
+  if (!contentData || !contentData.type) {
+    console.log('[AIContentRenderer] No content data or type');
+    return null;
+  }
+  
+  console.log('[AIContentRenderer] Rendering', contentData.parts?.length, 'parts');
+  
+  // contentData structure example:
+  // {
+  //   type: 'robot',
+  //   parts: [
+  //     { name: 'head', shape: 'sphere', position: [0, 0.3, 0], scale: [0.2, 0.2, 0.2], color: '#ffcc00' },
+  //     { name: 'body', shape: 'box', position: [0, 0, 0], scale: [0.3, 0.4, 0.25], color: '#3366ff' },
+  //     ...
+  //   ]
+  // }
+  
+  return (
+    <group position={position} rotation={rotation}>
+      {contentData.parts && contentData.parts.map((part, index) => {
+        // Convert 0-1 normalized coordinates to centered positions
+        // 0.5 = center, so we need to offset by -0.5 and then scale
+        const scaledPos = [
+          (part.position[0] - 0.5) * boxScale.x,
+          (part.position[1] - 0.5) * boxScale.y,
+          (part.position[2] - 0.5) * boxScale.z
+        ];
+        const scaledScale = [
+          part.scale[0] * boxScale.x,
+          part.scale[1] * boxScale.y,
+          part.scale[2] * boxScale.z
+        ];
+        
+        return (
+          <mesh
+            key={`${contentData.type}-${part.name}-${index}`}
+            position={scaledPos}
+            rotation={part.rotation || [0, 0, 0]}
+            castShadow
+            receiveShadow
+          >
+            {part.shape === 'sphere' && <sphereGeometry args={[scaledScale[0], 32, 32]} />}
+            {part.shape === 'box' && <boxGeometry args={scaledScale} />}
+            {part.shape === 'cylinder' && <cylinderGeometry args={[scaledScale[0], scaledScale[0], scaledScale[1], 32]} />}
+            {part.shape === 'cone' && <coneGeometry args={[scaledScale[0], scaledScale[1], 32]} />}
+            {part.shape === 'torus' && <torusGeometry args={[scaledScale[0], scaledScale[1], 16, 32]} />}
+            
+            <meshStandardMaterial
+              color={part.color || '#ffffff'}
+              metalness={part.metalness || 0.3}
+              roughness={part.roughness || 0.7}
+              emissive={part.emissive || '#000000'}
+              emissiveIntensity={part.emissiveIntensity || 0}
+            />
+          </mesh>
+        );
+      })}
+    </group>
+  );
+}
+
+// Component to sync AI content position with mesh position
+function AIContentSyncedWithMesh({ meshRef, contentData, cubePosition, cubeRotation, cubeScale, isSelected }) {
+  const groupRef = React.useRef();
+  
+  // Sync position with mesh on every frame when selected
+  useFrame(() => {
+    if (meshRef.current && groupRef.current) {
+      if (isSelected) {
+        // Follow meshRef position when selected (being transformed)
+        groupRef.current.position.copy(meshRef.current.position);
+        groupRef.current.rotation.copy(meshRef.current.rotation);
+        groupRef.current.scale.copy(meshRef.current.scale);
+      }
+    }
+  });
+  
+  // Set initial position from cube state
+  React.useEffect(() => {
+    if (groupRef.current && !isSelected) {
+      groupRef.current.position.set(cubePosition.x, cubePosition.y, cubePosition.z);
+      groupRef.current.rotation.set(cubeRotation.x, cubeRotation.y, cubeRotation.z);
+      groupRef.current.scale.set(cubeScale.x, cubeScale.y, cubeScale.z);
+    }
+  }, [cubePosition, cubeRotation, cubeScale, isSelected]);
+  
+  return (
+    <group ref={groupRef}>
+      <AIContentRenderer
+        contentData={contentData}
+        boxScale={{ x: 1, y: 1, z: 1 }}
+        position={[0, 0, 0]}
+        rotation={[0, 0, 0]}
+      />
+    </group>
+  );
+}
+
+function PlacedCube({ cube, isSelected, onSelect, editMode, dragMode, transformMode, snap, translateSnap, rotateSnapDeg, scaleSnap, onTransformEnd, showCollisionMeshes, orbitControlsRef }) {
   const meshRef = React.useRef();
   const transformRef = React.useRef();
+  const [isSnapped, setIsSnapped] = React.useState(false);
+  
+  // If this cube is a child (has parentId), follow parent's transform in real-time
+  useFrame(() => {
+    if (cube.parentId && meshRef.current) {
+      const parentTransform = window.__CF_PARENT_TRANSFORMS__?.[cube.parentId];
+      if (parentTransform && cube.followParentScale) {
+        // Get parent's current transform from the scene
+        meshRef.current.position.copy(parentTransform.position);
+        
+        // Recalculate scale based on parent's bounds and current scale
+        const parentCube = CURRENT_PLACED_CUBES.find(c => c.id === cube.parentId);
+        if (parentCube && parentCube.modelBounds) {
+          const bounds = parentCube.modelBounds;
+          meshRef.current.scale.set(
+            bounds.width * parentTransform.scale.x,
+            bounds.height * parentTransform.scale.y,
+            bounds.depth * parentTransform.scale.z
+          );
+        }
+        
+        // Force update of mesh matrix for all children (helpers, wireframes, etc.)
+        meshRef.current.updateMatrix();
+        meshRef.current.updateMatrixWorld(true); // true = force update children
+        
+        // Update TransformControls to follow the mesh
+        if (transformRef.current) {
+          transformRef.current.updateMatrixWorld();
+        }
+      }
+    }
+  });
   
   // Render primitive shapes (box/sphere) for collision objects
-  // Only sync on mouseUp (final position) - opponent sees snapped result, not live dragging
+  // Send live transform updates while dragging + final on mouseUp
+  const isDragging = React.useRef(false);
+  const lastBroadcastRef = React.useRef(0);
+  
   React.useEffect(() => {
     if (transformRef.current && meshRef.current) {
       const controls = transformRef.current;
       
+      const handleDraggingChanged = (event) => {
+        isDragging.current = event.value;
+      };
+      
       const handleMouseUp = () => {
         if (!meshRef.current) return;
         const { position, rotation, scale } = meshRef.current;
+        
+        // Immediately set targets to current position to prevent snap-back
+        targetPos.current.copy(position);
+        targetRot.current.copy(rotation);
+        targetScale.current.copy(scale);
+        
         const updates = {
           position: { x: position.x, y: position.y, z: position.z },
           rotation: { x: rotation.x, y: rotation.y, z: rotation.z },
           scale: { x: scale.x, y: scale.y, z: scale.z }
         };
         
+        // Include snap information if present
+        if (meshRef.current.userData.snapInfo) {
+          updates.snappedTo = meshRef.current.userData.snapInfo.targetCubeId;
+          updates.snappedEdge = meshRef.current.userData.snapInfo.movingEdge;
+        } else {
+          updates.snappedTo = null;
+          updates.snappedEdge = null;
+        }
+        
         // Send final snapped position to opponent
         if (onTransformEnd) onTransformEnd(updates);
       };
       
+      controls.addEventListener('dragging-changed', handleDraggingChanged);
       controls.addEventListener('mouseUp', handleMouseUp);
-      return () => controls.removeEventListener('mouseUp', handleMouseUp);
+      return () => {
+        controls.removeEventListener('dragging-changed', handleDraggingChanged);
+        controls.removeEventListener('mouseUp', handleMouseUp);
+      };
     }
   }, [onTransformEnd]);
+  
+  // LIVE TRANSFORM BROADCAST for primitives (box/sphere/cylinder)
+  // Also applies edge snapping for terrain floors
+  useFrame(() => {
+    if (!isDragging.current || !meshRef.current) return;
+    
+    // Throttle to ~30fps
+    const now = performance.now();
+    if (now - lastBroadcastRef.current < 33) return;
+    lastBroadcastRef.current = now;
+    
+    const { position, rotation, scale } = meshRef.current;
+    
+    // Apply edge snapping for terrain floors during translate mode
+    if (cube.isTerrain && transformMode === 'translate') {
+      // Create virtual main floor terrain for snapping
+      const mainFloorTerrain = {
+        id: 'main-floor',
+        isTerrain: true,
+        position: { x: 0, y: 0, z: 0 },
+        rotation: { x: 0, y: 0, z: 0 },
+        scale: { x: 100, y: 1, z: 100 }, // Approximate size of main floor
+        hasTerrainNoise: true
+      };
+      
+      const snapInfo = detectEdgeSnap(
+        {
+          ...cube,
+          position: { x: position.x, y: position.y, z: position.z },
+          rotation: { x: rotation.x, y: rotation.y, z: rotation.z },
+          scale: { x: scale.x, y: scale.y, z: scale.z }
+        },
+        [...CURRENT_PLACED_CUBES, mainFloorTerrain], // Include main floor in snap candidates
+        2.0 // Snap distance threshold
+      );
+      
+      if (snapInfo) {
+        // Apply snap offset - only moves perpendicular to edge, allows sliding along edge
+        position.x += snapInfo.snapOffset.x;
+        position.z += snapInfo.snapOffset.z;
+        
+        // Store snap info for terrain edge matching
+        meshRef.current.userData.snapInfo = snapInfo;
+        setIsSnapped(true);
+      } else {
+        delete meshRef.current.userData.snapInfo;
+        setIsSnapped(false);
+      }
+    }
+    
+    if (onTransformEnd) {
+      onTransformEnd({
+        position: { x: position.x, y: position.y, z: position.z },
+        rotation: { x: rotation.x, y: rotation.y, z: rotation.z },
+        scale: { x: scale.x, y: scale.y, z: scale.z },
+        isLive: true,
+        snappedTo: meshRef.current.userData.snapInfo?.targetCubeId,
+        snappedEdge: meshRef.current.userData.snapInfo?.movingEdge
+      });
+    }
+  });
   
   // Update transform controls mode and snap
   React.useEffect(() => {
@@ -1954,24 +3189,143 @@ function PlacedCube({ cube, isSelected, editMode, dragMode, transformMode, snap,
     }
   }, [transformMode, snap, translateSnap, rotateSnapDeg, scaleSnap]);
   
+  // SMOOTH INTERPOLATION for primitives (box/sphere/cylinder) when opponent sees live updates
+  const targetPos = React.useRef(new THREE.Vector3());
+  const targetRot = React.useRef(new THREE.Euler());
+  const targetScale = React.useRef(new THREE.Vector3(1, 1, 1));
+  
+  // When FIRST selected, initialize position from cube state
+  // (Only when transitioning from unselected -> selected, not the reverse)
+  const wasSelected = React.useRef(false);
+  React.useEffect(() => {
+    if (isSelected && !wasSelected.current && meshRef.current && cube) {
+      // Transitioning to selected state - set initial position
+      meshRef.current.position.set(cube.position.x, cube.position.y, cube.position.z);
+      meshRef.current.rotation.set(cube.rotation.x, cube.rotation.y, cube.rotation.z);
+      meshRef.current.scale.set(cube.scale.x, cube.scale.y, cube.scale.z);
+      // Also set targets to prevent lerping
+      targetPos.current.set(cube.position.x, cube.position.y, cube.position.z);
+      targetRot.current.set(cube.rotation.x, cube.rotation.y, cube.rotation.z);
+      targetScale.current.set(cube.scale.x, cube.scale.y, cube.scale.z);
+    }
+    wasSelected.current = isSelected;
+  }, [isSelected, cube]);
+  
+  React.useEffect(() => {
+    if (cube && !cube.parentId && !isDragging.current) {
+      targetPos.current.set(cube.position.x, cube.position.y, cube.position.z);
+      targetRot.current.set(cube.rotation.x, cube.rotation.y, cube.rotation.z);
+      targetScale.current.set(cube.scale.x, cube.scale.y, cube.scale.z);
+    }
+  }, [cube]);
+  
+  // Ultra-smooth interpolation for opponent watching the transform
+  useFrame((_, delta) => {
+    if (!meshRef.current || isDragging.current || cube.parentId) return;
+    
+    const lerpFactor = Math.min(1, delta * 50); // Super smooth for opponent
+    
+    meshRef.current.position.lerp(targetPos.current, lerpFactor);
+    meshRef.current.rotation.x += (targetRot.current.x - meshRef.current.rotation.x) * lerpFactor;
+    meshRef.current.rotation.y += (targetRot.current.y - meshRef.current.rotation.y) * lerpFactor;
+    meshRef.current.rotation.z += (targetRot.current.z - meshRef.current.rotation.z) * lerpFactor;
+    meshRef.current.scale.lerp(targetScale.current, lerpFactor);
+  });
+  
+  // Load texture if cube has one (for terrain) - MUST be before any conditional returns
+  const [texture, setTexture] = React.useState(null);
+  
+  React.useEffect(() => {
+    if (cube.texture && cube.texture !== '') {
+      console.log('[TEXTURE LOAD] 📥 Loading texture:', cube.texture, 'for cube:', cube.id);
+      const loader = new THREE.TextureLoader();
+      loader.load(
+        cube.texture,
+        (loadedTexture) => {
+          console.log('[TEXTURE LOAD] ✅ Successfully loaded:', cube.texture, 'for cube:', cube.id);
+          if (cube.isTerrain) {
+            loadedTexture.wrapS = loadedTexture.wrapT = THREE.RepeatWrapping;
+            const repeatScale = cube.textureRepeat || 10;
+            loadedTexture.repeat.set(repeatScale, repeatScale);
+          }
+          setTexture(loadedTexture);
+        },
+        undefined,
+        (err) => {
+          console.error('[TEXTURE LOAD] ❌ Failed to load:', cube.texture, err);
+          setTexture(null);
+        }
+      );
+    } else {
+      console.log('[TEXTURE LOAD] ⭕ No texture for cube:', cube.id, '(isTerrain:', cube.isTerrain, 'texture:', cube.texture, ')');
+      setTexture(null);
+    }
+  }, [cube.texture, cube.isTerrain, cube.textureRepeat, cube.id]);
+  
+  // Update texture repeat to maintain square tiles even with non-uniform scaling
+  React.useEffect(() => {
+    if (texture && cube.isTerrain) {
+      const repeatValue = cube.textureRepeat || 10;
+      const scaleX = cube.scale?.x || 1;
+      const scaleZ = cube.scale?.z || 1;
+      
+      // Calculate aspect ratio and adjust repeat to keep tiles square
+      // If floor is wider in X, use more repeat in X direction
+      const aspectRatio = scaleX / scaleZ;
+      
+      if (aspectRatio > 1) {
+        // Wider in X direction
+        texture.repeat.set(repeatValue * aspectRatio, repeatValue);
+      } else {
+        // Wider in Z direction (or square)
+        texture.repeat.set(repeatValue, repeatValue / aspectRatio);
+      }
+      
+      texture.needsUpdate = true;
+    }
+  }, [texture, cube.textureRepeat, cube.scale?.x, cube.scale?.z, cube.isTerrain]);
+  
+  // Debug: Log material properties for terrain - MUST be before any conditional returns
+  React.useEffect(() => {
+    if (cube.isTerrain) {
+      console.log('[MATERIAL DEBUG] Cube:', cube.id, {
+        hasTextureProp: !!cube.texture,
+        textureValue: cube.texture,
+        textureState: texture ? 'loaded' : 'null',
+        willShowColor: texture ? '#ffffff' : '#22c55e'
+      });
+    }
+  }, [cube.isTerrain, cube.texture, texture, cube.id]);
+  
+  // Define shape variables - MUST be before any conditional returns
+  const isSphere = cube.shape === 'sphere';
+  const isCylinder = cube.shape === 'cylinder';
+  
   // Route to specialized components for 3D models (after all hooks)
+  // Check for customModelPath first (handles all models from props folder)
+  if (cube.customModelPath) {
+    return <CustomPlacedModel cube={cube} isSelected={isSelected} onSelect={onSelect} editMode={editMode} dragMode={dragMode} transformMode={transformMode} snap={snap} translateSnap={translateSnap} rotateSnapDeg={rotateSnapDeg} scaleSnap={scaleSnap} onTransformEnd={onTransformEnd} showCollisionMeshes={showCollisionMeshes} />;
+  }
+  
+  // Legacy hardcoded model types (for backward compatibility)
   if (cube.modelType === 'asteroid') {
-    return <AsteroidPlacedModel cube={cube} isSelected={isSelected} editMode={editMode} dragMode={dragMode} transformMode={transformMode} snap={snap} translateSnap={translateSnap} rotateSnapDeg={rotateSnapDeg} scaleSnap={scaleSnap} onTransformEnd={onTransformEnd} />;
+    return <AsteroidPlacedModel cube={cube} isSelected={isSelected} onSelect={onSelect} editMode={editMode} dragMode={dragMode} transformMode={transformMode} snap={snap} translateSnap={translateSnap} rotateSnapDeg={rotateSnapDeg} scaleSnap={scaleSnap} onTransformEnd={onTransformEnd} />;
+  }
+  
+  if (cube.modelType === 'rover') {
+    return <RoverPlacedModel cube={cube} isSelected={isSelected} onSelect={onSelect} editMode={editMode} dragMode={dragMode} transformMode={transformMode} snap={snap} translateSnap={translateSnap} rotateSnapDeg={rotateSnapDeg} scaleSnap={scaleSnap} onTransformEnd={onTransformEnd} />;
   }
   
   if (cube.modelType === 'table') {
-    return <TablePlacedModel cube={cube} isSelected={isSelected} editMode={editMode} dragMode={dragMode} transformMode={transformMode} snap={snap} translateSnap={translateSnap} rotateSnapDeg={rotateSnapDeg} scaleSnap={scaleSnap} onTransformEnd={onTransformEnd} />;
+    return <TablePlacedModel cube={cube} isSelected={isSelected} onSelect={onSelect} editMode={editMode} dragMode={dragMode} transformMode={transformMode} snap={snap} translateSnap={translateSnap} rotateSnapDeg={rotateSnapDeg} scaleSnap={scaleSnap} onTransformEnd={onTransformEnd} />;
   }
   
   if (cube.modelType === 'stairs2') {
     return <Stairs2PlacedModel cube={cube} isSelected={isSelected} editMode={editMode} dragMode={dragMode} transformMode={transformMode} snap={snap} translateSnap={translateSnap} rotateSnapDeg={rotateSnapDeg} scaleSnap={scaleSnap} onTransformEnd={onTransformEnd} showCollisionBoxes={showCollisionMeshes} />;
   }
   
-  const isSphere = cube.shape === 'sphere';
-  const isCylinder = cube.shape === 'cylinder';
-  
-  // Don't render anything if collision meshes are hidden
-  if (!showCollisionMeshes) return null;
+  // Don't render anything if collision meshes are hidden (except terrain - always show terrain)
+  if (!showCollisionMeshes && !cube.isTerrain && !cube.isAIBox) return null;
   
   // Render primitive shapes (box/sphere/cylinder) for collision objects
   return (
@@ -1994,24 +3348,38 @@ function PlacedCube({ cube, isSelected, editMode, dragMode, transformMode, snap,
               <boxGeometry args={[1, 1, 1]} />
             )}
             <meshStandardMaterial 
-              color={isSelected ? '#10b981' : cube.color}
+              key={`material-${cube.id}-${texture ? 'textured' : 'notextured'}-${cube.isAIBox ? 'aibox' : 'normal'}`}
+              color={isSelected && !cube.isTerrain ? '#10b981' : (cube.isTerrain ? (texture ? '#ffffff' : '#22c55e') : cube.color)}
               metalness={0.3}
               roughness={0.7}
-              transparent
-              opacity={0.7}
-              wireframe={!cube.hasCollision}
+              transparent={cube.isTerrain ? !texture : true}
+              opacity={cube.isAIBox ? 0.15 : (cube.isTerrain ? (texture ? 1 : 0.6) : (texture ? 1 : 0.7))}
+              wireframe={cube.isAIBox || !cube.hasCollision}
+              map={texture || undefined}
             />
           </mesh>
         </DraggableObject>
       ) : (
         <group>
+          {/* Main collision box - always render but make invisible when terrain noise is on and collision boxes hidden */}
           <mesh
             ref={meshRef}
-            position={[cube.position.x, cube.position.y, cube.position.z]}
-            rotation={[cube.rotation.x, cube.rotation.y, cube.rotation.z]}
-            scale={[cube.scale.x, cube.scale.y, cube.scale.z]}
-            castShadow
-            receiveShadow
+            position={cube.parentId || isSelected ? undefined : [cube.position.x, cube.position.y, cube.position.z]}
+            rotation={isSelected ? undefined : [cube.rotation.x, cube.rotation.y, cube.rotation.z]}
+            scale={cube.parentId || isSelected ? undefined : [cube.scale.x, cube.scale.y, cube.scale.z]}
+            castShadow={!(cube.isTerrain && cube.hasTerrainNoise && !showCollisionMeshes)}
+            receiveShadow={!(cube.isTerrain && cube.hasTerrainNoise && !showCollisionMeshes)}
+            onClick={(e) => {
+              if (editMode) {
+                e.stopPropagation();
+                onSelect();
+              }
+            }}
+            visible={
+              cube.isAIBox 
+                ? (showCollisionMeshes || isSelected) // AI Box visible when collision meshes shown OR when selected
+                : !(cube.isTerrain && cube.hasTerrainNoise && !showCollisionMeshes)
+            }
           >
             {isSphere ? (
               <sphereGeometry args={[0.5, 32, 32]} />
@@ -2021,19 +3389,112 @@ function PlacedCube({ cube, isSelected, editMode, dragMode, transformMode, snap,
               <boxGeometry args={[1, 1, 1]} />
             )}
             <meshStandardMaterial 
-              color={isSelected ? '#10b981' : cube.color}
+              key={`material-${cube.id}-${texture ? 'textured' : 'notextured'}-${cube.hasTerrainNoise ? 'terrain' : 'flat'}-${isSnapped ? 'snapped' : 'unsnapped'}-${cube.isAIBox ? 'aibox' : 'normal'}`}
+              color={isSelected && !cube.isTerrain ? '#10b981' : (cube.isTerrain ? (cube.hasTerrainNoise ? '#22c55e' : (texture ? '#ffffff' : '#22c55e')) : cube.color)}
               metalness={0.3}
               roughness={0.7}
-              transparent
-              opacity={editMode ? 0.7 : 0.5}
-              wireframe={!cube.hasCollision}
+              transparent={cube.isTerrain ? true : true}
+              opacity={cube.isAIBox ? 0.15 : (cube.isTerrain ? (cube.hasTerrainNoise ? 0.6 : (texture ? 1 : 0.6)) : (editMode ? (texture ? 1 : 0.7) : (texture ? 1 : 0.5)))}
+              wireframe={cube.isAIBox || !cube.hasCollision}
+              map={cube.isTerrain && cube.hasTerrainNoise ? undefined : (texture || undefined)}
+              emissive={isSnapped ? '#00ff00' : (cube.isAIBox ? '#22d3ee' : '#000000')}
+              emissiveIntensity={isSnapped ? 0.3 : (cube.isAIBox ? 0.5 : 0)}
             />
           </mesh>
+          
+          {/* AI-Generated Content - synced with mesh position via useFrame */}
+          {cube.isAIBox && (cube.aiContentData || cube.aiContent) && (
+            <AIContentSyncedWithMesh
+              meshRef={meshRef}
+              contentData={cube.aiContentData || cube.aiContent}
+              cubePosition={cube.position}
+              cubeRotation={cube.rotation}
+              cubeScale={cube.scale}
+              isSelected={isSelected}
+            />
+          )}
+          
+          {/* Terrain surface mesh on top - only if terrain noise enabled */}
+          {cube.isTerrain && cube.hasTerrainNoise && (
+            <mesh
+              ref={(el) => {
+                if (el) el.userData.terrainId = cube.id;
+              }}
+              position={[
+                cube.position.x,
+                cube.position.y + (cube.scale.y / 2), // Position on top of the box
+                cube.position.z
+              ]}
+              rotation={[
+                cube.rotation.x + (-Math.PI / 2), // Horizontal rotation + cube's X rotation
+                cube.rotation.y, // Cube's Y rotation
+                cube.rotation.z  // Cube's Z rotation
+              ]}
+              castShadow
+              receiveShadow
+            >
+              <TerrainGeometry cube={cube} />
+              <meshStandardMaterial 
+                key={`terrain-surface-${cube.id}-${texture ? 'textured' : 'notextured'}`}
+                color={texture ? '#ffffff' : '#22c55e'}
+                metalness={0.3}
+                roughness={0.7}
+                map={texture || undefined}
+              />
+            </mesh>
+          )}
+          
+          {/* Debug AI Box data */}
+          {cube.isAIBox && console.log('[DEBUG] AI Box found:', {
+            id: cube.id,
+            label: cube.aiBoxLabel,
+            hasAiContent: !!cube.aiContent,
+            hasAiContentData: !!cube.aiContentData,
+            aiContent: cube.aiContent,
+            aiContentData: cube.aiContentData
+          })}
+          
+          {/* AI Box Label - floating text above the box */}
+          {cube.isAIBox && cube.aiBoxLabel && (
+            <Billboard
+              follow={true}
+              position={[
+                cube.position.x,
+                cube.position.y + (cube.scale.y / 2) + 3,
+                cube.position.z
+              ]}
+            >
+              <Text
+                fontSize={1.5}
+                color={'#22d3ee'}
+                anchorX="center"
+                anchorY="bottom"
+                outlineWidth={0.1}
+                outlineColor={'#000'}
+                font={'https://fonts.gstatic.com/s/roboto/v30/KFOmCnqEu92Fr1Mu4mxP.ttf'}
+              >
+                {`🤖 ${cube.aiBoxLabel}`}
+              </Text>
+              <Text
+                fontSize={0.8}
+                color={'#cbd5e1'}
+                anchorX="center"
+                anchorY="top"
+                position={[0, -0.5, 0]}
+                outlineWidth={0.05}
+                outlineColor={'#000'}
+                font={'https://fonts.gstatic.com/s/roboto/v30/KFOmCnqEu92Fr1Mu4mxP.ttf'}
+              >
+                {(cube.aiContentData || cube.aiContent) ? 'Content Generated ✓' : 'Awaiting AI Content...'}
+              </Text>
+            </Billboard>
+          )}
+          
           {/* Always show TransformControls when selected, even in drag mode */}
-          {isSelected && editMode && (
+          {isSelected && editMode && meshRef.current && (
             <TransformControls
               ref={transformRef}
-              object={meshRef}
+              object={meshRef.current}
               mode={transformMode}
               enabled={!dragMode}
             />
@@ -2143,7 +3604,7 @@ function AsteroidFBXProp({ position = [18, 0, -22], scale = 0.06, rotation = [0,
 }
 
 // Scatter a handful of asteroid FBXs across the ground with varied sizes (one large)
-function AsteroidScatter({ count = 9, seed = 1337, radius = PLAY_AREA_RADIUS - 20, minScale = 0.045, maxScale = 0.12, bigScale = 0.28 }){
+function AsteroidScatter({ count = 9, seed = 1337, radius = TERRAIN_RADIUS - 20, minScale = 0.045, maxScale = 0.12, bigScale = 0.28 }){
   const src = useFBX('/models/props/asteroid/asteroid.fbx');
   const fh = ROWS * (CELL + GAP) - GAP + 0.6;
   const groundY = -fh / 2 - GROUND_CLEAR;
@@ -2986,7 +4447,7 @@ function ClassicTableFBX(){
 }
 
 // Asteroid surface floor with craters and scrolling motion to feel like flying over an asteroid
-function AsteroidFloor({ opacity = 1.0, radius = PLAY_AREA_RADIUS, speed = 0.35, dir = [1.0, 0.25], scale = 0.8 }) {
+function AsteroidFloor({ opacity = 1.0, radius = TERRAIN_RADIUS, speed = 0.35, dir = [1.0, 0.25], scale = 0.8 }) {
   // Same ground reference used elsewhere
   const fh = ROWS * (CELL + GAP) - GAP + 0.6; // height of the floor
   const groundY = -fh / 2 - GROUND_CLEAR; // position of the ground
@@ -3157,7 +4618,7 @@ function TexturedShadowOverlay({ size }){
 }
 
 // Lunar terrain with hills and mounds - characters can walk on the surface
-function LunarTerrain({ radius = PLAY_AREA_RADIUS, flatRadius = 50 }) {
+function LunarTerrain({ radius = TERRAIN_RADIUS, flatRadius = 50, showCollisionBox = false }) {
   const fh = ROWS * (CELL + GAP) - GAP + 0.6;
   const groundY = -fh / 2 - GROUND_CLEAR;
   const materialRef = useRef();
@@ -3277,6 +4738,14 @@ function LunarTerrain({ radius = PLAY_AREA_RADIUS, flatRadius = 50 }) {
           metalness={0.1}
         />
       </mesh>
+      
+      {/* Collision box visualization */}
+      {showCollisionBox && (
+        <mesh position={[0, 0.5, 0]}>
+          <boxGeometry args={[100, 1, 100]} />
+          <meshBasicMaterial color="#10b981" wireframe opacity={0.3} transparent />
+        </mesh>
+      )}
     </group>
   );
 }
@@ -4207,8 +5676,45 @@ function PlatformBlock({ position = [0,0,0], size = [10,0.2,10] }) {
 }
 
 function StairCollisionDebug({ show = false }) {
+  const [aabbs, setAabbs] = React.useState([]);
+  const meshRefs = React.useRef([]);
+  
+  // Update AABBs every frame to read live transforms
+  useFrame(() => {
+    if (!show) return;
+    const newAabbs = buildStairAABBsWorld();
+    
+    // Update mesh positions/scales based on new AABBs
+    newAabbs.forEach((b, idx) => {
+      const meshRef = meshRefs.current[idx];
+      if (meshRef) {
+        const sx = (b.max.x - b.min.x);
+        const sy = (b.max.y - b.min.y);
+        const sz = (b.max.z - b.min.z);
+        const cx = (b.min.x + b.max.x) / 2;
+        const cy = (b.min.y + b.max.y) / 2;
+        const cz = (b.min.z + b.max.z) / 2;
+        
+        meshRef.position.set(cx, cy, cz);
+        meshRef.scale.set(sx, sy, sz);
+      }
+    });
+    
+    // Update state if AABB count changed (cubes added/removed)
+    if (newAabbs.length !== aabbs.length) {
+      setAabbs(newAabbs);
+    }
+  });
+  
+  // Initialize AABBs on mount
+  React.useEffect(() => {
+    if (show) {
+      setAabbs(buildStairAABBsWorld());
+    }
+  }, [show]);
+  
   if (!show) return null;
-  const aabbs = buildStairAABBsWorld();
+  
   const meshes = aabbs.map((b, idx) => {
     const sx = (b.max.x - b.min.x);
     const sy = (b.max.y - b.min.y);
@@ -4219,8 +5725,12 @@ function StairCollisionDebug({ show = false }) {
     // Red for disabled stair1, cyan for stair2, green for stair3
     const color = b.disabled ? '#ef4444' : (b.stair3 ? '#22ff22' : '#22d3ee');
     return (
-      <mesh key={`scb-${idx}`} position={[cx, cy, cz]}>
-        <boxGeometry args={[sx, sy, sz]} />
+      <mesh 
+        key={`scb-${idx}`} 
+        ref={el => meshRefs.current[idx] = el}
+        position={[cx, cy, cz]}
+      >
+        <boxGeometry args={[1, 1, 1]} />
         <meshBasicMaterial color={color} wireframe transparent opacity={0.6} depthWrite={false} />
       </mesh>
     );
@@ -6794,6 +8304,11 @@ function EditableAudioVisualizer({
   React.useEffect(() => {
     if (transformRef.current && groupRef.current) {
       const controls = transformRef.current;
+      
+      const handleDraggingChanged = (event) => {
+        // No special logic needed - just track dragging state if needed
+      };
+      
       const handleMouseUp = () => {
         if (!groupRef.current) return;
         const { position, rotation, scale } = groupRef.current;
@@ -6821,8 +8336,13 @@ function EditableAudioVisualizer({
         
         if (onTransformEnd) onTransformEnd(updates);
       };
+      
+      controls.addEventListener('dragging-changed', handleDraggingChanged);
       controls.addEventListener('mouseUp', handleMouseUp);
-      return () => controls.removeEventListener('mouseUp', handleMouseUp);
+      return () => {
+        controls.removeEventListener('dragging-changed', handleDraggingChanged);
+        controls.removeEventListener('mouseUp', handleMouseUp);
+      };
     }
   }, [onTransformEnd, visualizer.refDistance, visualizer.maxDistance]);
   
@@ -6998,7 +8518,7 @@ function EditableAudioVisualizer({
           ref={transformRef} 
           object={groupRef.current} 
           mode={transformMode} 
-          enabled={!dragMode} 
+          enabled={!dragMode}
         />
       )}
       
@@ -7012,21 +8532,26 @@ function EditableAudioVisualizer({
           ]} 
           style={{ pointerEvents: 'none' }}
         >
-          <div style={{
-            position: 'absolute',
-            top: '0',
-            left: '400px',
-            background: 'rgba(15, 23, 42, 0.95)',
-            padding: '10px',
-            borderRadius: '8px',
-            color: '#e2e8f0',
-            fontSize: '12px',
-            minWidth: '200px',
-            boxShadow: '0 4px 12px rgba(0,0,0,0.5)',
-            pointerEvents: 'auto',
-            zIndex: 10000,
-            border: '2px solid #f59e0b'
-          }}>
+          <div 
+            onPointerDown={(e) => e.stopPropagation()}
+            onPointerMove={(e) => e.stopPropagation()}
+            onPointerUp={(e) => e.stopPropagation()}
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              position: 'absolute',
+              top: '0',
+              left: '400px',
+              background: 'rgba(15, 23, 42, 0.95)',
+              padding: '10px',
+              borderRadius: '8px',
+              color: '#e2e8f0',
+              fontSize: '12px',
+              minWidth: '200px',
+              boxShadow: '0 4px 12px rgba(0,0,0,0.5)',
+              pointerEvents: 'auto',
+              zIndex: 10000,
+              border: '2px solid #f59e0b'
+            }}>
             <div style={{ fontWeight: 600, marginBottom: '8px', color: '#fbbf24', fontSize: '13px' }}>🔊 Audio Zone Settings</div>
             
             <label style={{ display: 'block', marginBottom: '10px' }}>
@@ -7925,7 +9450,7 @@ function Piece({ color = '#e63946', c, r, flip180 = false }) {
 }
 
 // Keyboard movement wrapper for the local player's avatar
-function PlayerMover({ enabled = false, maxRadius = PLAY_AREA_RADIUS, speed = 16, baseOffset = [0,0], onPositionChange, moveTarget = null, onArrive, turnSpeed = 2.4, turnSensitivity = 1.5, initialYaw = 0, invertForward = false, clickYawOffset = 0, obstacles = [], collisionRadius = 2.2, collisionForwardOffset = -1.05, groundSamplePush = 2.3, backProbeMag = null, stairMagMul = 1.0, labelName = null, labelSide = null, characterId = null, showCollisionBoxes = false, settingsMenuOpen = false, setShowEditMenu = null, setShowChatUI = null, setFullCamera = null, setFollowCam = null, children }) {
+function PlayerMover({ enabled = false, maxRadius = PLAY_AREA_RADIUS, speed = 16, baseOffset = [0,0], onPositionChange, moveTarget = null, onArrive, turnSpeed = 2.4, turnSensitivity = 1.5, initialYaw = 0, invertForward = false, clickYawOffset = 0, obstacles = [], collisionRadius = 2.2, collisionForwardOffset = -1.05, groundSamplePush = 2.3, backProbeMag = null, stairMagMul = 1.0, labelName = null, labelSide = null, characterId = null, showCollisionBoxes = false, settingsMenuOpen = false, setShowEditMenu = null, setShowChatUI = null, setFullCamera = null, setFollowCam = null, showEditMenu = false, activeEditorTab = 'objects', setActiveEditorTab = null, selectedSectionIndex = 0, setSelectedSectionIndex = null, isInSection = false, setIsInSection = null, selectedItemIndex = 0, setSelectedItemIndex = null, isInSubMenu = false, setIsInSubMenu = null, selectedSubItemIndex = 0, setSelectedSubItemIndex = null, cubeEditMode = false, placedCubes = [], children }) {
   // Physics constants for jump/fall
   const GRAVITY_FAST = -920.0;         // fast gravity for stairs and general falling
   const GRAVITY_SLOW_FALL = -84.0;     // slowest fall when stepping off the big top platform
@@ -8089,7 +9614,13 @@ function PlayerMover({ enabled = false, maxRadius = PLAY_AREA_RADIUS, speed = 16
     rightStickY: 0,
     bButton: false,
     bButtonPressed: false,
-    leftStickClick: false
+    leftStickClick: false,
+    lb: false,
+    rb: false,
+    dpadUp: false,
+    dpadDown: false,
+    aButton: false,
+    bButtonForMenu: false
   });
 
   useFrame((_, dt) => {
@@ -8100,6 +9631,17 @@ function PlayerMover({ enabled = false, maxRadius = PLAY_AREA_RADIUS, speed = 16
     const gamepad = gamepads[0]; // Use first connected gamepad
     
     if (gamepad) {
+      // Debug: Log button 13 state
+      if (gamepad.buttons[13]?.pressed) {
+        console.log('Button 13 (D-pad Down) is pressed!', {
+          showEditMenu,
+          setSelectedSectionIndex: !!setSelectedSectionIndex,
+          setSelectedItemIndex: !!setSelectedItemIndex,
+          isInSection,
+          selectedSectionIndex
+        });
+      }
+      
       // Left stick for movement (axis 0 = left/right, axis 1 = up/down)
       const deadzone = 0.15; // Ignore small stick movements
       const leftX = Math.abs(gamepad.axes[0]) > deadzone ? gamepad.axes[0] : 0;
@@ -8129,50 +9671,407 @@ function PlayerMover({ enabled = false, maxRadius = PLAY_AREA_RADIUS, speed = 16
         setShowEditMenu(prev => !prev);
       }
       
-      // D-pad Right button (button 15) to toggle chat UI
+      // D-pad Right button (button 15) - horizontal menu navigation when in section, or toggle chat UI
       const dpadRightNow = gamepad.buttons[15]?.pressed || false;
       const dpadRightPressed = dpadRightNow && !gamepadState.current.dpadRight;
       gamepadState.current.dpadRight = dpadRightNow;
       
-      // Debug: log button state every frame when button is pressed
-      if (dpadRightNow) {
-        console.log('D-pad right button 15 pressed:', {
-          buttonPressed: dpadRightNow,
-          wasPressed: gamepadState.current.dpadRight,
-          dpadRightPressed,
-          hasSetShowChatUI: !!setShowChatUI
-        });
+      if (dpadRightPressed) {
+        // Priority: Sub-menu horizontal navigation
+        if (showEditMenu && isInSubMenu && setSelectedSubItemIndex) {
+          console.log('D-pad Right pressed in sub-menu! current:', selectedSubItemIndex);
+          setSelectedSubItemIndex(prev => {
+            // Sub-menu horizontal groups:
+            // 0-1: Duplicate/Delete buttons
+            // 2-3: Collision/Walkable checkboxes
+            // 4-6: Box/Sphere/Cylinder collision shapes
+            if (prev >= 0 && prev <= 1) {
+              // Navigate between Duplicate (0) and Delete (1)
+              return prev === 0 ? 1 : 0;
+            } else if (prev >= 2 && prev <= 3) {
+              // Navigate between Collision (2) and Walkable (3)
+              return prev === 2 ? 3 : 2;
+            } else if (prev >= 4 && prev <= 6) {
+              // Navigate between Box (4), Sphere (5), Cylinder (6)
+              const newIndex = prev >= 6 ? 6 : prev + 1; // Stop at 6, no wrap
+              return newIndex;
+            }
+            return prev;
+          });
+        }
+        // Priority: Horizontal navigation in Object Placer section when inside and on collision shapes
+        else if (showEditMenu && isInSection && selectedSectionIndex === 0 && cubeEditMode && selectedItemIndex >= 1 && selectedItemIndex <= 3 && setSelectedItemIndex) {
+          console.log('D-pad Right: navigating collision shapes');
+          setSelectedItemIndex(prev => {
+            const newIndex = prev >= 3 ? 3 : prev + 1; // Stop at 3, no wrap
+            console.log('Navigating collision shapes right, prev:', prev, 'new:', newIndex);
+            return newIndex;
+          });
+        }
+        // Priority: Horizontal navigation in Collision Shapes section (2x2 grid)
+        else if (showEditMenu && isInSection && selectedSectionIndex === 1 && setSelectedItemIndex) {
+          console.log('D-pad Right: navigating Collision Shapes section 2x2 grid');
+          setSelectedItemIndex(prev => {
+            // Top row: 0 (Box) -> 1 (Sphere)
+            if (prev === 0) return 1;
+            // Bottom row: 2 (Cylinder) -> 3 (Capsule)
+            if (prev === 2) return 3;
+            // Already at right edge (1 or 3), stay there
+            return prev;
+          });
+        }
+        // Fallback: Toggle chat UI when not navigating menu
+        else if (setShowChatUI) {
+          console.log('D-pad right pressed, toggling chat UI');
+          setShowChatUI(prev => {
+            console.log('Chat UI toggled from', prev, 'to', !prev);
+            return !prev;
+          });
+        }
       }
       
-      if (dpadRightPressed && setShowChatUI) {
-        console.log('D-pad right pressed, toggling chat UI');
-        setShowChatUI(prev => {
-          console.log('Chat UI toggled from', prev, 'to', !prev);
-          return !prev;
-        });
-      }
-      
-      // D-pad Up button (button 12) to toggle camera mode (3rd person / full camera)
+      // D-pad Up button (button 12) - menu navigation when edit menu open, camera toggle when closed
       const dpadUpNow = gamepad.buttons[12]?.pressed || false;
       const dpadUpPressed = dpadUpNow && !gamepadState.current.dpadUp;
       gamepadState.current.dpadUp = dpadUpNow;
       
-      if (dpadUpPressed && setFullCamera && setFollowCam) {
-        console.log('D-pad up pressed, toggling camera mode');
-        setFullCamera(prev => {
-          const newFullCamera = !prev;
-          console.log('Camera mode toggled to:', newFullCamera ? 'full camera' : '3rd person');
-          
-          // If turning ON full camera, turn OFF 3rd person
-          if (newFullCamera) {
-            setFollowCam(false);
+      if (dpadUpPressed) {
+        // Priority: Sub-menu navigation when in sub-menu
+        if (isInSubMenu && setSelectedSubItemIndex) {
+          console.log('D-pad Up pressed in sub-menu! current:', selectedSubItemIndex);
+          setSelectedSubItemIndex(prev => {
+            // Sub-menu horizontal groups (skip entire groups, don't navigate within them):
+            // Group 1: 0-1 (Duplicate/Delete)
+            // Group 2: 2-3 (Collision/Walkable)  
+            // Group 3: 4-6 (Box/Sphere/Cylinder)
+            
+            let newIndex;
+            if (prev >= 4 && prev <= 6) {
+              // From collision shapes group → jump to Collision checkbox group (start at 2)
+              newIndex = 2;
+            } else if (prev >= 2 && prev <= 3) {
+              // From checkboxes group → jump to Duplicate/Delete group (start at 0)
+              newIndex = 0;
+            } else {
+              // From Duplicate/Delete group → wrap to collision shapes (start at 4)
+              newIndex = 4;
+            }
+            
+            console.log('Navigating sub-items up (group jump), prev:', prev, 'new:', newIndex);
+            return newIndex;
+          });
+        }
+        // Priority: Menu navigation when edit menu is open
+        else if (showEditMenu && setSelectedSectionIndex && setSelectedItemIndex) {
+          console.log('D-pad Up pressed! isInSection:', isInSection, 'current selectedSectionIndex:', selectedSectionIndex);
+          if (isInSection) {
+            // Navigate items within section upward
+            setSelectedItemIndex(prev => {
+              // Determine max items for current section
+              let maxItems = 0;
+              if (selectedSectionIndex === 0) {
+                // Object Placer: 0=checkbox, 1-3=collision shapes, 4+=placed objects (excluding terrain)
+                if (cubeEditMode) {
+                  const numPlacedObjects = placedCubes.filter(c => !c.parentId && !c.isTerrain).length;
+                  maxItems = 3 + numPlacedObjects; // checkbox + 3 shapes + placed objects (no terrain)
+                } else {
+                  maxItems = 0;
+                }
+              } else if (selectedSectionIndex === 1) {
+                // Collision Shapes section - 4 buttons in 2x2 grid
+                maxItems = 3; // 0=Box, 1=Sphere, 2=Cylinder, 3=Capsule
+              } else if (selectedSectionIndex === 2) {
+                // Primitives section - removed
+                maxItems = 0;
+              }
+              
+              // D-pad Up: When in section 1 (Collision Shapes), navigate within 2x2 grid
+              if (selectedSectionIndex === 1 && isInSection) {
+                // From bottom row (2,3) to top row (0,1)
+                if (prev === 2) return 0; // Bottom Left to Top Left
+                if (prev === 3) return 1; // Bottom Right to Top Right
+                // Already in top row (0,1), stay there (don't exit)
+                return prev;
+              }
+              
+              // D-pad Up: In section 0, handle navigation
+              if (selectedSectionIndex === 0) {
+                // From shapes (1-3), go to checkbox (0)
+                if (prev >= 1 && prev <= 3) return 0;
+                // From first placed object (4), go to middle shape (2 - Sphere)
+                if (prev === 4) return 2;
+              }
+              
+              const newIndex = prev <= 0 ? 0 : prev - 1; // Stop at top, no wrap
+              console.log('Navigating items up, prev:', prev, 'max:', maxItems, 'new:', newIndex);
+              return newIndex;
+            });
           } else {
-            // If turning OFF full camera, turn ON 3rd person
-            setFollowCam(true);
+            // Navigate sections upward (stop at 0, no wrap)
+            setSelectedSectionIndex(prev => {
+              const newIndex = prev <= 0 ? 0 : prev - 1;
+              console.log('Navigating sections up, prev:', prev, 'new:', newIndex);
+              return newIndex;
+            });
           }
+        } 
+        // Fallback: Camera toggle when menu is closed
+        else if (setFullCamera && setFollowCam) {
+          console.log('D-pad up pressed, toggling camera mode');
+          setFullCamera(prev => {
+            const newFullCamera = !prev;
+            console.log('Camera mode toggled to:', newFullCamera ? 'full camera' : '3rd person');
+            
+            // If turning ON full camera, turn OFF 3rd person
+            if (newFullCamera) {
+              setFollowCam(false);
+            } else {
+              // If turning OFF full camera, turn ON 3rd person
+              setFollowCam(true);
+            }
           
-          return newFullCamera;
-        });
+            return newFullCamera;
+          });
+        }
+      }
+      
+      // LB (Left Bumper - button 4) to cycle tabs left
+      const lbNow = gamepad.buttons[4]?.pressed || false;
+      const lbPressed = lbNow && !gamepadState.current.lb;
+      gamepadState.current.lb = lbNow;
+      
+      if (lbPressed && setActiveEditorTab && showEditMenu) {
+        const tabs = ['objects', 'models', 'transform', 'audio', 'settings'];
+        const currentIndex = tabs.indexOf(activeEditorTab);
+        const newIndex = currentIndex <= 0 ? tabs.length - 1 : currentIndex - 1;
+        setActiveEditorTab(tabs[newIndex]);
+      }
+      
+      // RB (Right Bumper - button 5) to cycle tabs right
+      const rbNow = gamepad.buttons[5]?.pressed || false;
+      const rbPressed = rbNow && !gamepadState.current.rb;
+      gamepadState.current.rb = rbNow;
+      
+      if (rbPressed && setActiveEditorTab && showEditMenu) {
+        const tabs = ['objects', 'models', 'transform', 'audio', 'settings'];
+        const currentIndex = tabs.indexOf(activeEditorTab);
+        const newIndex = currentIndex >= tabs.length - 1 ? 0 : currentIndex + 1;
+        setActiveEditorTab(tabs[newIndex]);
+      }
+      
+      // D-pad Down (button 13) for menu section navigation when edit menu is open
+      const dpadDownNow = gamepad.buttons[13]?.pressed || false;
+      const dpadDownPressed = dpadDownNow && !gamepadState.current.dpadDown;
+      gamepadState.current.dpadDown = dpadDownNow;
+      
+      if (dpadDownNow) {
+        console.log('D-pad Down state:', { dpadDownNow, wasPressedBefore: !dpadDownPressed, dpadDownPressed });
+      }
+      
+      if (dpadDownPressed) {
+        // Priority: Sub-menu navigation when in sub-menu
+        if (isInSubMenu && setSelectedSubItemIndex) {
+          console.log('D-pad Down pressed in sub-menu! current:', selectedSubItemIndex);
+          setSelectedSubItemIndex(prev => {
+            // Sub-menu horizontal groups (skip entire groups, don't navigate within them):
+            // Group 1: 0-1 (Duplicate/Delete)
+            // Group 2: 2-3 (Collision/Walkable)
+            // Group 3: 4-6 (Box/Sphere/Cylinder)
+            
+            let newIndex;
+            if (prev >= 0 && prev <= 1) {
+              // From Duplicate/Delete group → jump to Collision/Walkable group (start at 2)
+              newIndex = 2;
+            } else if (prev >= 2 && prev <= 3) {
+              // From checkboxes group → jump to collision shapes group (start at 4)
+              newIndex = 4;
+            } else {
+              // From collision shapes group → wrap to Duplicate/Delete (start at 0)
+              newIndex = 0;
+            }
+            
+            console.log('Navigating sub-items down (group jump), prev:', prev, 'new:', newIndex);
+            return newIndex;
+          });
+        }
+        // Menu navigation when edit menu is open
+        else if (showEditMenu && setSelectedSectionIndex && setSelectedItemIndex) {
+          console.log('D-pad Down pressed! isInSection:', isInSection, 'current selectedSectionIndex:', selectedSectionIndex);
+          if (isInSection) {
+            // Navigate items within section
+            setSelectedItemIndex(prev => {
+              // Determine max items for current section
+              let maxItems = 0;
+              if (selectedSectionIndex === 0) {
+                // Object Placer: 0=checkbox, 1-3=collision shapes, 4+=placed objects (excluding terrain)
+                if (cubeEditMode) {
+                  const numPlacedObjects = placedCubes.filter(c => !c.parentId && !c.isTerrain).length;
+                  maxItems = 3 + numPlacedObjects; // checkbox + 3 shapes + placed objects (no terrain)
+                } else {
+                  maxItems = 0;
+                }
+              } else if (selectedSectionIndex === 1) {
+                // Collision Shapes section - 3 buttons horizontal (Box, Sphere, Cylinder)
+                maxItems = 2; // 0=Box, 1=Sphere, 2=Cylinder
+              } else if (selectedSectionIndex === 2) {
+                // Primitives section - removed
+                maxItems = 0;
+              }
+              
+              // D-pad Down: When in section 1 (Collision Shapes), navigate within 2x2 grid
+              if (selectedSectionIndex === 1 && isInSection) {
+                // From top row (0,1) to bottom row (2,3)
+                if (prev === 0) return 2; // Top Left to Bottom Left
+                if (prev === 1) return 3; // Top Right to Bottom Right
+                // Already in bottom row (2,3), stay there (don't exit)
+                return prev;
+              }
+              
+              // D-pad Down: In section 0, handle navigation
+              if (selectedSectionIndex === 0) {
+                // From checkbox (0), go to first shape (1)
+                if (prev === 0) return 1;
+                // From any shape (1-3), go to first placed object (4) or stay on last shape
+                if (prev >= 1 && prev <= 3) return 4;
+              }
+              
+              const newIndex = prev >= maxItems ? maxItems : prev + 1; // Stop at bottom, no wrap
+              console.log('Navigating items, prev:', prev, 'max:', maxItems, 'new:', newIndex);
+              return newIndex;
+            });
+          } else {
+            // Navigate sections (stop at 1, no wrap - only 2 sections now)
+            setSelectedSectionIndex(prev => {
+              const newIndex = prev >= 1 ? 1 : prev + 1;
+              console.log('Navigating sections, prev:', prev, 'new:', newIndex);
+              return newIndex;
+            });
+          }
+        }
+      }
+      
+      // A button (button 0) to enter/activate in menu
+      const aButtonNow = gamepad.buttons[0]?.pressed || false;
+      const aButtonPressed = aButtonNow && !gamepadState.current.aButton;
+      gamepadState.current.aButton = aButtonNow;
+      
+      if (aButtonPressed && showEditMenu && setIsInSection) {
+        console.log('A button pressed! isInSection:', isInSection, 'isInSubMenu:', isInSubMenu, 'selectedSectionIndex:', selectedSectionIndex, 'selectedItemIndex:', selectedItemIndex);
+        if (!isInSection) {
+          // Enter the selected section to navigate items inside
+          setIsInSection(true);
+          setSelectedItemIndex && setSelectedItemIndex(0);
+          console.log('Entered section', selectedSectionIndex);
+        } else if (isInSection && !isInSubMenu) {
+          // Check if we're on a placed object (item >= 4 in section 0)
+          if (selectedSectionIndex === 0 && selectedItemIndex >= 4) {
+            // Enter sub-menu to navigate buttons/toggles inside the placed object
+            console.log('🎮 Entering sub-menu for placed object', selectedItemIndex);
+            setIsInSubMenu && setIsInSubMenu(true);
+            setSelectedSubItemIndex && setSelectedSubItemIndex(0);
+          } else {
+            // Activate/click the selected item
+            console.log('🎮 A BUTTON: Clicking item', selectedItemIndex, 'in section', selectedSectionIndex);
+            
+            // Section 0 = Object Placer
+            if (selectedSectionIndex === 0) {
+              console.log('🎮 Dispatching event for section 0, item', selectedItemIndex);
+              const event = new CustomEvent('controllerMenuItemActivate', {
+                detail: { section: 0, item: selectedItemIndex }
+              });
+              window.dispatchEvent(event);
+              console.log('🎮 Event dispatched!');
+            }
+            // Section 1 = Collision Shapes
+            else if (selectedSectionIndex === 1) {
+              const event = new CustomEvent('controllerMenuItemActivate', {
+                detail: { section: 1, item: selectedItemIndex }
+              });
+              window.dispatchEvent(event);
+            }
+          }
+        } else if (isInSubMenu) {
+          // Activate/click the selected sub-item
+          console.log('🎮 A BUTTON: Clicking sub-item', selectedSubItemIndex, 'of placed object', selectedItemIndex);
+          const event = new CustomEvent('controllerSubMenuItemActivate', {
+            detail: { objectIndex: selectedItemIndex, subItem: selectedSubItemIndex }
+          });
+          window.dispatchEvent(event);
+        }
+      }
+      
+      // B button (button 1) to exit from sub-menu or section
+      const bButtonForMenuNow = gamepad.buttons[1]?.pressed || false;
+      const bButtonForMenuPressed = bButtonForMenuNow && !gamepadState.current.bButtonForMenu;
+      gamepadState.current.bButtonForMenu = bButtonForMenuNow;
+      
+      if (bButtonForMenuPressed && showEditMenu) {
+        if (isInSubMenu && setIsInSubMenu) {
+          // Exit sub-menu back to placed object list
+          console.log('B button pressed - exiting sub-menu');
+          setIsInSubMenu(false);
+          setSelectedSubItemIndex && setSelectedSubItemIndex(0);
+        } else if (isInSection && setIsInSection) {
+          // Exit section back to section navigation
+          console.log('B button pressed - exiting section');
+          setIsInSection(false);
+          setSelectedItemIndex && setSelectedItemIndex(0);
+        }
+      }
+      
+      // D-pad Left (button 14) for horizontal item navigation
+      const dpadLeftNow = gamepad.buttons[14]?.pressed || false;
+      const dpadLeftPressed = dpadLeftNow && !gamepadState.current.dpadLeft;
+      gamepadState.current.dpadLeft = dpadLeftNow;
+      
+      if (dpadLeftPressed && showEditMenu) {
+        // Priority: Sub-menu horizontal navigation
+        if (isInSubMenu && setSelectedSubItemIndex) {
+          console.log('D-pad Left pressed in sub-menu! current:', selectedSubItemIndex);
+          setSelectedSubItemIndex(prev => {
+            // Sub-menu horizontal groups:
+            // 0-1: Duplicate/Delete buttons
+            // 2-3: Collision/Walkable checkboxes
+            // 4-6: Box/Sphere/Cylinder collision shapes
+            if (prev >= 0 && prev <= 1) {
+              // Navigate between Duplicate (0) and Delete (1)
+              return prev === 0 ? 1 : 0;
+            } else if (prev >= 2 && prev <= 3) {
+              // Navigate between Collision (2) and Walkable (3)
+              return prev === 2 ? 3 : 2;
+            } else if (prev >= 4 && prev <= 6) {
+              // Navigate between Box (4), Sphere (5), Cylinder (6)
+              const newIndex = prev <= 4 ? 4 : prev - 1; // Stop at 4, no wrap
+              return newIndex;
+            }
+            return prev;
+          });
+        }
+        // Section item navigation
+        else if (setSelectedItemIndex && isInSection) {
+          console.log('D-pad Left pressed! selectedSectionIndex:', selectedSectionIndex, 'selectedItemIndex:', selectedItemIndex);
+          setSelectedItemIndex(prev => {
+            // For Object Placer section 0: items 1, 2, 3 are the collision shape buttons (horizontal)
+            if (selectedSectionIndex === 0 && cubeEditMode) {
+              // If on items 1-3 (collision shapes), navigate left
+              if (prev >= 1 && prev <= 3) {
+                const newIndex = prev <= 1 ? 1 : prev - 1; // Stop at 1, no wrap
+                console.log('Navigating collision shapes left, prev:', prev, 'new:', newIndex);
+                return newIndex;
+              }
+            }
+            // For Collision Shapes section 1: 2x2 grid
+            else if (selectedSectionIndex === 1) {
+              // Top row: 1 (Sphere) -> 0 (Box)
+              if (prev === 1) return 0;
+              // Bottom row: 3 (Capsule) -> 2 (Cylinder)
+              if (prev === 3) return 2;
+              // Already at left edge (0 or 2), stay there
+              return prev;
+            }
+            return prev; // No horizontal navigation for other items/sections
+          });
+        }
       }
       
       // Left stick click for run (button 10 on Xbox controller - L3)
@@ -8248,7 +10147,8 @@ function PlayerMover({ enabled = false, maxRadius = PLAY_AREA_RADIUS, speed = 16
     ref.current.rotation.y = effYaw;
 
     // Jump trigger on Space press OR B button (only if grounded / not already jumping)
-  const spaceTapped = !!(jp['Space']) || gp.bButtonPressed;
+    // B button only triggers jump when edit menu is closed
+  const spaceTapped = !!(jp['Space']) || (gp.bButtonPressed && !showEditMenu);
     const grounded = (jumpY <= 0.0001);
     // Current world Y of the avatar's feet (local ground baseline + platform lift + jump offset)
     const feetWorldY = localGroundY + platformLift + jumpY;
@@ -10123,12 +12023,146 @@ function SettingsMenu({ isOpen, onClose, settings, onSave, onLiveUpdate }) {
         }} />
       </div>
     )}
-    
     </>
   );
 }
 
-export default function ConnectFour3DView({ board, lastMove, colors, onSelectColumn, flip180 = false, myCharacterId = 'astronaut', oppCharacterId = 'alien', onAvatarMove, myName = 'You', oppName = 'Opponent' }) {
+// CRITICAL: Define RemoteAvatarGroup OUTSIDE main component to prevent recreation on every render
+// If defined inside, React sees it as a new component type and remounts avatars, resetting animation
+function RemoteAvatarGroup({ side, base, children }){
+  const gref = useRef();
+  const pos = useRef({ x: base.x, z: base.z });
+  const target = useRef({ x: base.x, z: base.z, has: false });
+  const yawRef = useRef(0);
+  const yawTargetRef = useRef(null);
+  const lastTargetPos = useRef({ x: base.x, z: base.z });
+  const lastMoveAtRef = useRef(0);
+  const lastMsgAtRef = useRef(0);
+  const lastRunRef = useRef(false);
+  const lastJumpRef = useRef(false);
+  const lastLiftRef = useRef(0);
+  const [isWalking, setIsWalking] = useState(false);
+  const [isRunning, setIsRunning] = useState(false);
+  const [isTurningLeft, setIsTurningLeft] = useState(false);
+  const [isTurningRight, setIsTurningRight] = useState(false);
+  const [isJumpingRemote, setIsJumpingRemote] = useState(false);
+  const [liftRemote, setLiftRemote] = useState(0);
+  const prevYawRef = useRef(0);
+  const prevYawTsRef = useRef(0);
+  const norm = (a)=>{ let v=(a+Math.PI)%(2*Math.PI); if(v<0) v+=2*Math.PI; return v-Math.PI; };
+  const unwrapToNear = (wrapped, near)=>{ const w = norm(wrapped); const k = Math.round((near - w)/(2*Math.PI)); return w + k*2*Math.PI; };
+  
+  useLayoutEffect(() => {
+    try {
+      const msg = window.__CF_REMOTE_AVATAR__;
+      if (msg && msg.side === side && Number.isFinite(msg.x) && Number.isFinite(msg.z)) {
+        pos.current = { x: Number(msg.x), z: Number(msg.z) };
+        if (typeof msg.yaw === 'number' && Number.isFinite(msg.yaw)) {
+          const yw = norm(Number(msg.yaw));
+          yawRef.current = yw; yawTargetRef.current = yw;
+          prevYawRef.current = yw; prevYawTsRef.current = performance.now();
+        }
+        if (typeof msg.lift === 'number' && Number.isFinite(msg.lift)) {
+          lastLiftRef.current = Number(msg.lift);
+          setLiftRemote(Number(msg.lift));
+        }
+      }
+    } catch {}
+  }, [side, base.x, base.z]);
+  
+  useFrame((_, delta) => {
+    try {
+      const msg = window.__CF_REMOTE_AVATAR__;
+      if (msg && msg.side === side) {
+        const tx = Number(msg.x); const tz = Number(msg.z);
+        if (Number.isFinite(tx) && Number.isFinite(tz)) {
+          target.current = { x: tx, z: tz, has: true };
+          const dxT = tx - lastTargetPos.current.x;
+          const dzT = tz - lastTargetPos.current.z;
+          const moved2 = dxT*dxT + dzT*dzT;
+          if (moved2 > 1e-6) {
+            lastMoveAtRef.current = performance.now();
+            lastTargetPos.current.x = tx; lastTargetPos.current.z = tz;
+          }
+          lastMsgAtRef.current = performance.now();
+        }
+        if (typeof msg.yaw === 'number' && Number.isFinite(msg.yaw)) {
+          const prev = (typeof yawTargetRef.current === 'number') ? yawTargetRef.current : yawRef.current || 0;
+          yawTargetRef.current = unwrapToNear(Number(msg.yaw), prev);
+        }
+        if (typeof msg.run === 'boolean') lastRunRef.current = !!msg.run;
+        if (typeof msg.isJumping === 'boolean') lastJumpRef.current = !!msg.isJumping;
+        if (typeof msg.lift === 'number' && Number.isFinite(msg.lift)) lastLiftRef.current = Number(msg.lift);
+      }
+      const alpha = Math.min(1, delta * 10.0);
+      const tx = target.current.has ? target.current.x : pos.current.x;
+      const tz = target.current.has ? target.current.z : pos.current.z;
+      pos.current.x += (tx - pos.current.x) * alpha;
+      pos.current.z += (tz - pos.current.z) * alpha;
+      if (typeof yawTargetRef.current === 'number') {
+        const cur = yawRef.current;
+        const tgt = yawTargetRef.current;
+        const rotAlpha = Math.min(1, delta * 10.0);
+        yawRef.current = cur + (tgt - cur) * rotAlpha;
+      }
+      if (gref.current) {
+        gref.current.position.set(pos.current.x, 0, pos.current.z);
+        gref.current.rotation.y = norm(yawRef.current || 0);
+      }
+      const now = performance.now();
+      const running = !!lastRunRef.current;
+      const WALK_GRACE_MS = 85;
+      const walking = running || ((now - lastMoveAtRef.current) < WALK_GRACE_MS);
+      if (walking !== isWalking) setIsWalking(walking);
+      if (running !== isRunning) setIsRunning(running);
+      const newJump = !!lastJumpRef.current;
+      const newLift = Number(lastLiftRef.current) || 0;
+      if (newJump !== isJumpingRemote) setIsJumpingRemote(newJump);
+      if (Math.abs(newLift - liftRemote) > 0.01) setLiftRemote(newLift);
+      const prevTs = prevYawTsRef.current || now - Math.max(1, delta*1000);
+      const dtMs = Math.max(1, now - prevTs);
+      const dtSec = dtMs / 1000;
+      const yawVel = (yawRef.current - prevYawRef.current) / dtSec;
+      const TURN_THRESH = 0.5;
+      const turningL = !walking && (yawVel > TURN_THRESH);
+      const turningR = !walking && (yawVel < -TURN_THRESH);
+      if (turningL !== isTurningLeft) setIsTurningLeft(turningL);
+      if (turningR !== isTurningRight) setIsTurningRight(turningR);
+      prevYawRef.current = yawRef.current;
+      prevYawTsRef.current = now;
+    } catch {}
+  });
+  
+  const prevPropsRef = useRef({});
+  const clonedChildrenRef = useRef(null);
+  const currentProps = { isWalking, isRunning, isTurningLeft, isTurningRight, isJumpingRemote, liftRemote };
+  const propsChanged = Object.keys(currentProps).some(key => prevPropsRef.current[key] !== currentProps[key]);
+  
+  if (propsChanged || !clonedChildrenRef.current) {
+    prevPropsRef.current = currentProps;
+    clonedChildrenRef.current = React.Children.map(children, (child, idx) => {
+      if (idx === 0 && React.isValidElement(child)) {
+        return React.cloneElement(child, { 
+          isWalking, isRunning, isTurningLeft, isTurningRight, 
+          isJumping: isJumpingRemote, extraLiftY: liftRemote
+        });
+      } else if (idx === 1 && React.isValidElement(child)) {
+        if (child.props && child.props.position) {
+          const [x, y, z] = child.props.position;
+          return React.cloneElement(child, {
+            ...child.props,
+            position: [x, y + liftRemote, z]
+          });
+        }
+      }
+      return child;
+    });
+  }
+  
+  return <group ref={gref}>{clonedChildrenRef.current}</group>;
+}
+
+function ConnectFour3DView({ board, lastMove, colors, onSelectColumn, flip180 = false, myCharacterId = 'astronaut', oppCharacterId = 'alien', onAvatarMove, myName = 'You', oppName = 'Opponent' }) {
   // Clean up cached world state on mount to ensure stability across hot reloads
   useEffect(() => {
     try {
@@ -10192,6 +12226,20 @@ export default function ConnectFour3DView({ board, lastMove, colors, onSelectCol
   // UI toggles
   const [showSelf, setShowSelf] = useState(false);
   const [moveEnabled, setMoveEnabled] = useState(true);
+  const [isDraggingCube, setIsDraggingCube] = useState(false); // Track if user is dragging an object
+  
+  // Store drag state in window global so PlayerMover can check it
+  React.useEffect(() => {
+    window.__CF_IS_DRAGGING_CUBE__ = isDraggingCube;
+    
+    // Provide callback for CustomPlacedModel to set drag state
+    window.__CF_SET_DRAGGING_CUBE__ = setIsDraggingCube;
+    
+    return () => {
+      delete window.__CF_SET_DRAGGING_CUBE__;
+    };
+  }, [isDraggingCube]);
+  
   const [clickMove, setClickMove] = useState(false);
   const [fullCamera, setFullCamera] = useState(false);
   const [followCam, setFollowCam] = useState(false);
@@ -10428,6 +12476,22 @@ export default function ConnectFour3DView({ board, lastMove, colors, onSelectCol
     setLiveSettings(newSettings);
   }, []);
   
+  // Hide footer when game board is active (has pieces)
+  useEffect(() => {
+    const gameHasStarted = board && board.some(row => row.some(cell => cell !== 0));
+    if (gameHasStarted) {
+      document.body.classList.add('hide-footer');
+      // Also set --footer-h to 0 so UI elements that use it adjust
+      document.documentElement.style.setProperty('--footer-h', '0px');
+    } else {
+      document.body.classList.remove('hide-footer');
+      // Footer will restore its own height when visible
+    }
+    return () => {
+      document.body.classList.remove('hide-footer');
+    };
+  }, [board]);
+  
   // Decorative stairs UI state
   const [showEditMenu, setShowEditMenu] = useState(false); // Toggle for edit menu visibility
   const [showCollisionMeshes, setShowCollisionMeshes] = useState(false); // Toggle for collision box visibility
@@ -10450,6 +12514,52 @@ export default function ConnectFour3DView({ board, lastMove, colors, onSelectCol
   });
   const [selectedVisualizer, setSelectedVisualizer] = useState(null);
   const [availableSounds, setAvailableSounds] = useState(['rocket_ambience.mp3']); // List of available sound files
+  const [customModels, setCustomModels] = useState([]); // List of uploaded custom models
+  const [availableModels, setAvailableModels] = useState([]); // List of all available models from props folder
+  const [selectedModelToLoad, setSelectedModelToLoad] = useState(null); // Selected model from dropdown
+  const [activeEditorTab, setActiveEditorTab] = useState('objects'); // Active tab in editor panel
+  
+  // Controller navigation state for editor menu
+  const [selectedSectionIndex, setSelectedSectionIndex] = useState(0); // Which section is selected
+  const [isInSection, setIsInSection] = useState(false); // Whether we're inside a section navigating items
+  const [selectedItemIndex, setSelectedItemIndex] = useState(0); // Which item in the section is selected
+  const [isInSubMenu, setIsInSubMenu] = useState(false); // Whether we're inside a placed object's sub-menu
+  const [selectedSubItemIndex, setSelectedSubItemIndex] = useState(0); // Which button/toggle in the sub-menu is selected
+  
+  // Scroll selected placed object into view when navigating with controller
+  useEffect(() => {
+    if (isInSection && selectedSectionIndex === 0 && selectedItemIndex >= 4) {
+      // This is a placed object (items 4+)
+      const element = document.querySelector(`[data-placed-object-index="${selectedItemIndex}"]`);
+      if (element) {
+        element.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      }
+    }
+  }, [selectedItemIndex, isInSection, selectedSectionIndex]);
+  
+  // Scroll selected section into view when navigating main menu with controller
+  useEffect(() => {
+    if (!isInSection && showEditMenu) {
+      // When not inside a section, scroll the section itself into view
+      const element = document.querySelector(`[data-section-index="${selectedSectionIndex}"]`);
+      if (element) {
+        element.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      }
+    }
+  }, [selectedSectionIndex, isInSection, showEditMenu]);
+  
+  // Load available models from server on mount
+  useEffect(() => {
+    fetch('/api/models')
+      .then(res => res.json())
+      .then(data => {
+        if (data.models && data.models.length > 0) {
+          setAvailableModels(data.models);
+          console.log(`Loaded ${data.models.length} available models from props folder`);
+        }
+      })
+      .catch(err => console.error('Failed to load models:', err));
+  }, []);
   
   // Load available sound files on mount
   useEffect(() => {
@@ -10461,6 +12571,18 @@ export default function ConnectFour3DView({ board, lastMove, colors, onSelectCol
         }
       })
       .catch(err => console.error('Failed to load sounds:', err));
+  }, []);
+  
+  // Load custom models on mount
+  useEffect(() => {
+    fetch('/api/models')
+      .then(res => res.json())
+      .then(data => {
+        if (data.models && data.models.length > 0) {
+          setCustomModels(data.models);
+        }
+      })
+      .catch(err => console.error('Failed to load custom models:', err));
   }, []);
   
   // ===== CUBE PLACEMENT SYSTEM =====
@@ -10492,8 +12614,297 @@ export default function ConnectFour3DView({ board, lastMove, colors, onSelectCol
   const [cubeDragMode, setCubeDragMode] = useState(false); // Enable free-drag movement
   const [cubeSnap, setCubeSnap] = useState(true);
   const [cubeTranslateSnap, setCubeTranslateSnap] = useState(1.0);
+  
+  // Terrain sculpting state
+  const [sculptMode, setSculptMode] = useState(false); // Enable terrain sculpting
+  const [sculptBrushSize, setSculptBrushSize] = useState(5); // Brush radius
+  const [sculptStrength, setSculptStrength] = useState(0.5); // How much to raise/lower per scroll
+  const [sculptHistory, setSculptHistory] = useState([]); // History of sculpt operations for undo
   const [cubeRotateSnapDeg, setCubeRotateSnapDeg] = useState(15);
   const [cubeScaleSnap, setCubeScaleSnap] = useState(0.1);
+  
+  // AI Box editor state
+  const [aiBoxEditorOpen, setAIBoxEditorOpen] = useState(false);
+  const [aiBoxEditTitle, setAIBoxEditTitle] = useState('');
+  const [aiBoxEditPrompt, setAIBoxEditPrompt] = useState('');
+  
+  // Server restart countdown state (compact - shows in status button)
+  const [restartCountdown, setRestartCountdown] = useState(null); // null, 5, 4, 3, 2, 1, 'disconnected', 'reconnecting', 'reconnected'
+  const countdownIntervalRef = useRef(null);
+  
+  // Server status state
+  const [showServerStatus, setShowServerStatus] = useState(false);
+  const [serverStatus, setServerStatus] = useState('checking'); // 'online', 'offline', 'checking'
+  
+  // Check server status periodically
+  useEffect(() => {
+    const checkServer = () => {
+      fetch('http://localhost:3002/api/models')
+        .then(() => setServerStatus('online'))
+        .catch(() => setServerStatus('offline'));
+    };
+    
+    checkServer(); // Check immediately
+    const interval = setInterval(checkServer, 5000); // Check every 5 seconds
+    
+    return () => clearInterval(interval);
+  }, []);
+  
+  // Open AI Box editor when an AI Box is selected
+  useEffect(() => {
+    if (selectedCubeId) {
+      const selectedCube = placedCubes.find(c => c.id === selectedCubeId);
+      if (selectedCube && selectedCube.isAIBox) {
+        setAIBoxEditorOpen(true);
+        // Auto-enable editing mode and collision boxes when opening editor
+        setCubeEditMode(true);
+        setShowCollisionMeshes(true);
+        // Extract custom title (remove "AI Box #" prefix if exists)
+        const label = selectedCube.aiBoxLabel || '';
+        const match = label.match(/AI Box #(\d+)(?:\s*-\s*(.+))?/);
+        if (match && match[2]) {
+          setAIBoxEditTitle(match[2]); // Extract custom title after " - "
+        } else {
+          setAIBoxEditTitle(''); // No custom title yet
+        }
+        // Load AI prompt if it exists
+        setAIBoxEditPrompt(selectedCube.aiPrompt || '');
+      } else {
+        setAIBoxEditorOpen(false);
+      }
+    } else {
+      setAIBoxEditorOpen(false);
+    }
+  }, [selectedCubeId, placedCubes]);
+
+  // Auto-toggle editing mode and collision boxes when edit menu opens/closes
+  useEffect(() => {
+    if (showEditMenu) {
+      setCubeEditMode(true);
+      setShowCollisionMeshes(true);
+    } else {
+      setCubeEditMode(false);
+      setShowCollisionMeshes(false);
+    }
+  }, [showEditMenu]);
+  
+  // Listen for server restart countdown (broadcast from other player or received via WebSocket)
+  useEffect(() => {
+    console.log('🔄 [RESTART] Event listener registered for cf:server-restart-countdown');
+    
+    const handleRestartCountdown = (e) => {
+      try {
+        console.log('🔄 [RESTART] Event received:', e.detail);
+        
+        if (e.detail && typeof e.detail.countdown === 'number') {
+          console.log('🔄 [RESTART] Starting countdown from:', e.detail.countdown);
+          
+          // Clear any existing countdown interval
+          if (countdownIntervalRef.current) {
+            console.log('🔄 [RESTART] Clearing existing interval');
+            clearInterval(countdownIntervalRef.current);
+            countdownIntervalRef.current = null;
+          }
+          
+          setRestartCountdown(e.detail.countdown);
+          console.log('🔄 [RESTART] Set restartCountdown state to:', e.detail.countdown);
+          
+          // Start countdown timer
+          let count = e.detail.countdown - 1;
+          countdownIntervalRef.current = setInterval(() => {
+            if (count > 0) {
+              setRestartCountdown(count);
+              count--;
+            } else {
+              clearInterval(countdownIntervalRef.current);
+              countdownIntervalRef.current = null;
+              setRestartCountdown('disconnected');
+              
+              // Clean up initiator flag if it exists
+              if (window.__CF_RESTART_INITIATOR__) {
+                delete window.__CF_RESTART_INITIATOR__;
+              }
+            }
+          }, 1000);
+        } else if (e.detail && e.detail.countdown === 'disconnected') {
+          setRestartCountdown('disconnected');
+        }
+      } catch (err) {
+        console.error('Failed to handle restart countdown:', err);
+      }
+    };
+    
+    window.addEventListener('cf:server-restart-countdown', handleRestartCountdown);
+    return () => {
+      window.removeEventListener('cf:server-restart-countdown', handleRestartCountdown);
+      // Clean up interval on unmount
+      if (countdownIntervalRef.current) {
+        clearInterval(countdownIntervalRef.current);
+        countdownIntervalRef.current = null;
+      }
+    };
+  }, []);
+  
+  // Expose test function to window for manual testing
+  useEffect(() => {
+    window.__CF_TEST_RESTART_COUNTDOWN__ = (countdown = 5) => {
+      console.log('🧪 [TEST] Manually triggering countdown:', countdown);
+      console.log('🧪 [TEST] Current restartCountdown state:', restartCountdown);
+      window.dispatchEvent(new CustomEvent('cf:server-restart-countdown', { 
+        detail: { countdown } 
+      }));
+      console.log('🧪 [TEST] Event dispatched successfully');
+    };
+    
+    // Also expose direct state setter for testing
+    window.__CF_TEST_SET_COUNTDOWN_STATE__ = (value) => {
+      console.log('🧪 [TEST] Directly setting restartCountdown state to:', value);
+      setRestartCountdown(value);
+    };
+    
+    return () => {
+      delete window.__CF_TEST_RESTART_COUNTDOWN__;
+      delete window.__CF_TEST_SET_COUNTDOWN_STATE__;
+    };
+  }, [restartCountdown]);
+  
+  // Handle WebSocket reconnection after server restart
+  useEffect(() => {
+    if (restartCountdown === 'disconnected') {
+      // Start checking for reconnection immediately
+      let checkInterval;
+      const startChecking = () => {
+        checkInterval = setInterval(() => {
+          // Check if we're reconnected by looking for the global WebSocket ready state
+          if (window.__CF_WS_READY__) {
+            clearInterval(checkInterval);
+            setRestartCountdown('reconnected');
+            // Fade away after 2 seconds
+            setTimeout(() => setRestartCountdown(null), 2000);
+          }
+          // If not reconnected, stay on 'disconnected' - keep checking
+        }, 500);
+      };
+      
+      // Start checking after a brief delay (server needs time to restart)
+      const delayTimer = setTimeout(startChecking, 2000);
+      
+      return () => {
+        clearTimeout(delayTimer);
+        if (checkInterval) clearInterval(checkInterval);
+      };
+    }
+  }, [restartCountdown]);
+  
+  // Listen for controller menu item activation
+  useEffect(() => {
+    const handleMenuItemActivate = (e) => {
+      const { section, item } = e.detail;
+      console.log('🎯 EVENT RECEIVED: Menu item activated:', { section, item });
+      
+      // Section 0 = Object Placer
+      if (section === 0) {
+        if (item === 0) {
+          // Toggle "Enable editing" checkbox - trigger click on the checkbox
+          console.log('🎯 Toggling cubeEditMode checkbox');
+          const checkbox = document.querySelector('input[type="checkbox"]');
+          if (checkbox) {
+            checkbox.click();
+          }
+        }
+        else if (item === 1) {
+          // Cube button - trigger click on the actual button
+          console.log('🎯 Clicking Cube button');
+          const buttons = document.querySelectorAll('button');
+          for (const btn of buttons) {
+            if (btn.textContent.includes('Cube') || btn.onclick?.toString().includes('box')) {
+              btn.click();
+              break;
+            }
+          }
+        }
+        else if (item === 2) {
+          // Sphere button - trigger click on the actual button
+          console.log('🎯 Clicking Sphere button');
+          const buttons = document.querySelectorAll('button');
+          for (const btn of buttons) {
+            if (btn.textContent.includes('Sphere') || btn.onclick?.toString().includes('sphere')) {
+              btn.click();
+              break;
+            }
+          }
+        }
+        else if (item === 3) {
+          // Cylinder button - trigger click on the actual button
+          console.log('🎯 Clicking Cylinder button');
+          const buttons = document.querySelectorAll('button');
+          for (const btn of buttons) {
+            if (btn.textContent.includes('Cylinder') || btn.onclick?.toString().includes('cylinder')) {
+              btn.click();
+              break;
+            }
+          }
+        }
+        else if (item >= 4) {
+          // Placed objects - items 4+ select the object (excluding terrain)
+          const objIndex = item - 4; // Convert to placed objects array index
+          const placedObjects = placedCubes.filter(c => !c.parentId && !c.isTerrain);
+          if (objIndex < placedObjects.length) {
+            const cube = placedObjects[objIndex];
+            console.log('🎯 Selecting placed object:', cube.id);
+            setSelectedCubeId(cube.id);
+          }
+        }
+      }
+      // Section 1 = Collision Shapes - buttons at indices 0-4 (Box, Sphere, Cylinder, Capsule, AI Box)
+      else if (section === 1) {
+        const avatar = window.__CF_LOCAL_AVATAR__ || {};
+        const playerX = avatar.x || 0;
+        const playerZ = avatar.z || 0;
+        const playerY = (typeof avatar.lift === 'number' ? avatar.lift : 0);
+        const playerYaw = avatar.yaw || 0;
+        const spawnDistance = 15;
+        const spawnX = playerX + Math.sin(playerYaw) * spawnDistance;
+        const spawnZ = playerZ + Math.cos(playerYaw) * spawnDistance;
+        
+        const shapes = ['box', 'sphere', 'cylinder', 'capsule', 'aibox'];
+        const colors = ['#ef4444', '#f59e0b', '#8b5cf6', '#06b6d4', '#22d3ee'];
+        
+        if (item >= 0 && item < shapes.length) {
+          const isAIBox = shapes[item] === 'aibox';
+          const newCollision = {
+            id: Date.now() + Math.random(),
+            shape: isAIBox ? 'box' : shapes[item], // AI Box uses box shape for rendering
+            isAIBox: isAIBox, // Flag to identify AI boxes
+            aiBoxLabel: isAIBox ? `AI Box #${Math.floor(Math.random() * 9999)}` : undefined,
+            position: { x: spawnX, y: playerY, z: spawnZ },
+            rotation: { x: 0, y: 0, z: 0 },
+            scale: { x: 10, y: 10, z: 10 },
+            hasCollision: false, // AI boxes don't need collision by default
+            walkableTop: false,
+            color: colors[item],
+            opacity: isAIBox ? 0.15 : 0.3, // AI boxes are more transparent
+            wireframe: isAIBox, // AI boxes show as wireframe
+            aiContentData: null // Structured data describing the AI content (not JSX)
+          };
+          setPlacedCubes(prevCubes => [...prevCubes, newCollision]);
+          setSelectedCubeId(newCollision.id);
+          
+          if (isAIBox) {
+            console.log(`🤖 Created AI Box with ID: ${newCollision.id}, Label: ${newCollision.aiBoxLabel}`);
+            console.log(`📋 To generate content, tell Copilot: "Create a [object] in AI Box #${newCollision.id}"`);
+          }
+        }
+      }
+    };
+    
+    console.log('🎯 Setting up controllerMenuItemActivate event listener');
+    window.addEventListener('controllerMenuItemActivate', handleMenuItemActivate);
+    return () => {
+      console.log('🎯 Removing controllerMenuItemActivate event listener');
+      window.removeEventListener('controllerMenuItemActivate', handleMenuItemActivate);
+    };
+  }, []);  // Empty dependencies - we only use setState functions which are stable
   
   // Hide chat UI when in edit mode or fullscreen mode, or when manually toggled off
   useEffect(() => {
@@ -10509,25 +12920,67 @@ export default function ConnectFour3DView({ board, lastMove, colors, onSelectCol
   
   // Helper to send cube updates to opponent (called on discrete operations only)
   const sendCubeUpdate = useCallback((cubes) => {
+    console.log('[SEND CUBES] 📤 Sending cubes_sync to server:', cubes.map(c => ({ 
+      id: c.id, 
+      isTerrain: c.isTerrain, 
+      texture: c.texture,
+      shape: c.shape 
+    })));
     if (onAvatarMove) {
+      // Mark that we sent this update so we don't apply our own echo
+      window.__CF_LAST_CUBE_SEND_TIME__ = Date.now();
+      
       onAvatarMove({
         type: 'cubes_sync',
         cubes: cubes,
         timestamp: Date.now()
       });
+      console.log('[SEND CUBES] ✅ Called onAvatarMove with cubes_sync');
+    } else {
+      console.warn('[SEND CUBES] ❌ onAvatarMove is not defined!');
     }
   }, [onAvatarMove]);
   
-  // Save cubes to localStorage whenever they change
+  // Initialize collision cache on mount and whenever placedCubes changes
   React.useEffect(() => {
+    updatePlacedCubesCache(placedCubes);
+    console.log('[COLLISION] Cache initialized/updated with', placedCubes.length, 'cubes');
+  }, [placedCubes]);
+  
+  // Debug: Log when placedCubes state changes (specifically for terrain textures)
+  React.useEffect(() => {
+    const terrainCubes = placedCubes.filter(c => c.isTerrain);
+    if (terrainCubes.length > 0) {
+      console.log('[STATE DEBUG] 🔄 placedCubes state updated. Terrain cubes:', terrainCubes.map(c => ({
+        id: c.id,
+        texture: c.texture
+      })));
+    }
+  }, [placedCubes]);
+  
+  // Save cubes to localStorage whenever they change
+  const lastCubesJSONRef = React.useRef(null);
+  
+  React.useEffect(() => {
+    const cubesJSON = JSON.stringify(placedCubes);
+    
+    // Skip if cubes content hasn't actually changed (prevents unnecessary collision rebuilds on re-renders)
+    if (lastCubesJSONRef.current === cubesJSON) {
+      console.log('[COLLISION] Skipped cache update - no changes');
+      return;
+    }
+    lastCubesJSONRef.current = cubesJSON;
+    
+    console.log('[COLLISION] Updating cache - cubes changed!');
+    
     try {
-      localStorage.setItem('cf3d_placed_cubes', JSON.stringify(placedCubes));
+      localStorage.setItem('cf3d_placed_cubes', cubesJSON);
       // Broadcast to other windows/tabs
       window.dispatchEvent(new CustomEvent('cf:cubes_update', { 
-        detail: { cubes: placedCubes } 
+        detail: { cubes: placedCubes, sourceWindow: window } 
       }));
       
-      // Update module-level cache for real-time collision detection
+      // Update collision cache for physics
       updatePlacedCubesCache(placedCubes);
       
       // Note: Server sync is now handled immediately in add/delete/update functions
@@ -10537,10 +12990,75 @@ export default function ConnectFour3DView({ board, lastMove, colors, onSelectCol
     }
   }, [placedCubes]);
   
+  // Update child collision objects when their parent model moves/scales
+  React.useEffect(() => {
+    let hasChanges = false;
+    const updatedCubes = placedCubes.map(cube => {
+      if (cube.parentId) {
+        const parent = placedCubes.find(p => p.id === cube.parentId);
+        if (parent) {
+          // Check if position or scale needs updating
+          const positionChanged = 
+            cube.position.x !== parent.position.x ||
+            cube.position.y !== parent.position.y ||
+            cube.position.z !== parent.position.z;
+          
+          let newScale = cube.scale;
+          if (cube.followParentScale && parent.modelBounds) {
+            // Recalculate scale based on parent's current scale and bounds
+            const bounds = parent.modelBounds;
+            const worldWidth = bounds.width * parent.scale.x;
+            const worldHeight = bounds.height * parent.scale.y;
+            const worldDepth = bounds.depth * parent.scale.z;
+            
+            newScale = {
+              x: worldWidth,
+              y: worldHeight,
+              z: worldDepth
+            };
+          }
+          
+          const scaleChanged = 
+            newScale.x !== cube.scale.x ||
+            newScale.y !== cube.scale.y ||
+            newScale.z !== cube.scale.z;
+          
+          if (positionChanged || scaleChanged) {
+            hasChanges = true;
+            
+            const updated = {
+              ...cube,
+              position: { ...parent.position },
+              scale: newScale
+            };
+            
+            console.log('[Parent-Child useEffect] Updating child:', {
+              childId: cube.id,
+              preservedShape: updated.shape,
+              preservedWalkableTop: updated.walkableTop,
+              preservedHasCollision: updated.hasCollision
+            });
+            
+            // Preserve ALL cube properties, only update position and scale
+            return updated;
+          }
+        }
+      }
+      return cube;
+    });
+    
+    if (hasChanges) {
+      setPlacedCubes(updatedCubes);
+    }
+  }, [placedCubes]);
+  
   // Listen for cube updates from opponent or other tabs
   React.useEffect(() => {
     const handleCubeUpdate = (e) => {
       try {
+        // Ignore events from this same window to prevent loops
+        if (e.detail.sourceWindow === window) return;
+        
         if (e.detail && Array.isArray(e.detail.cubes)) {
           // Always accept all updates for real-time collaborative editing
           // Both players can edit the same cube and see each other's changes immediately
@@ -10605,15 +13123,33 @@ export default function ConnectFour3DView({ board, lastMove, colors, onSelectCol
     };
   }, [cubeEditMode]);
   
+  // Track the last timestamp we applied remote cubes to prevent duplicate applications
+  const lastAppliedRemoteCubesTimestamp = React.useRef(0);
+  
   // Poll for remote cube updates from server (similar to remote avatar polling)
   React.useEffect(() => {
     const interval = setInterval(() => {
       try {
         // Check if opponent has sent cube data (would be set by parent component receiving server messages)
         if (window.__CF_REMOTE_CUBES__ && !cubeEditMode) {
+          // Ignore echoes of our own updates for 1 second after sending
+          const lastSendTime = window.__CF_LAST_CUBE_SEND_TIME__ || 0;
+          const timeSinceSend = Date.now() - lastSendTime;
+          
+          if (timeSinceSend < 1000) {
+            console.log('[REMOTE CUBES] ⏭️ Ignoring echo of our own update (sent', timeSinceSend, 'ms ago)');
+            return;
+          }
+          
           const remoteCubes = window.__CF_REMOTE_CUBES__;
-          if (Array.isArray(remoteCubes) && remoteCubes.length >= 0) {
+          const remoteCubesTimestamp = window.__CF_REMOTE_CUBES_TIMESTAMP__ || 0;
+          
+          // Only apply if this is new data (different timestamp than last applied)
+          if (Array.isArray(remoteCubes) && remoteCubes.length >= 0 && remoteCubesTimestamp > lastAppliedRemoteCubesTimestamp.current) {
+            console.log('[REMOTE CUBES] 📥 Received NEW data from window global (ts:', remoteCubesTimestamp, ')');
             setPlacedCubes(remoteCubes);
+            lastAppliedRemoteCubesTimestamp.current = remoteCubesTimestamp;
+            console.log('[REMOTE CUBES] ✅ Applied to local state');
             // Save to localStorage so it persists
             localStorage.setItem('cf3d_placed_cubes', JSON.stringify(remoteCubes));
             // Update module-level cache for real-time collision
@@ -10649,6 +13185,8 @@ export default function ConnectFour3DView({ board, lastMove, colors, onSelectCol
     let defaultScale = { x: 5, y: 5, z: 5 };
     if (modelType === 'asteroid') {
       defaultScale = { x: 0.06, y: 0.06, z: 0.06 }; // Asteroid default scale
+    } else if (modelType === 'rover') {
+      defaultScale = { x: 0.08, y: 0.08, z: 0.08 }; // Rover default scale
     } else if (modelType === 'table') {
       defaultScale = { x: 0.15, y: 0.15, z: 0.15 }; // Table default scale
     } else if (modelType === 'stairs2') {
@@ -10674,9 +13212,10 @@ export default function ConnectFour3DView({ board, lastMove, colors, onSelectCol
     sendCubeUpdate(newCubes);
   }, [placedCubes, sendCubeUpdate]);
   
-  // Delete selected cube with immediate sync
+  // Delete selected cube with immediate sync (also removes children like collision boxes)
   const deleteCube = React.useCallback((id) => {
-    const newCubes = placedCubes.filter(c => c.id !== id);
+    // Remove the cube AND any children (collision boxes, etc.) that have this cube as parent
+    const newCubes = placedCubes.filter(c => c.id !== id && c.parentId !== id);
     setPlacedCubes(newCubes);
     if (selectedCubeId === id) setSelectedCubeId(null);
     
@@ -10684,14 +13223,275 @@ export default function ConnectFour3DView({ board, lastMove, colors, onSelectCol
     sendCubeUpdate(newCubes);
   }, [placedCubes, selectedCubeId, sendCubeUpdate]);
   
+  // Cleanup orphaned collision objects (children whose parents no longer exist)
+  const cleanupOrphanedCollisions = React.useCallback(() => {
+    const parentIds = new Set(placedCubes.map(c => c.id));
+    const newCubes = placedCubes.filter(c => {
+      // Keep if it has no parent, or if its parent still exists
+      return !c.parentId || parentIds.has(c.parentId);
+    });
+    
+    if (newCubes.length !== placedCubes.length) {
+      setPlacedCubes(newCubes);
+      sendCubeUpdate(newCubes);
+      console.log(`[Cleanup] Removed ${placedCubes.length - newCubes.length} orphaned collision objects`);
+    }
+  }, [placedCubes, sendCubeUpdate]);
+  
   // Update cube and send to network (used when transform is finished)
   const updateCubeAndSync = React.useCallback((id, updates) => {
-    const newCubes = placedCubes.map(c => c.id === id ? { ...c, ...updates } : c);
-    setPlacedCubes(newCubes);
+    console.log('[updateCubeAndSync] 🔄 START - Updating cube:', id, 'with updates:', updates);
     
-    // Send update to opponent (transform completed - no throttle needed)
-    sendCubeUpdate(newCubes);
-  }, [placedCubes, sendCubeUpdate]);
+    setPlacedCubes(prevCubes => {
+      const newCubes = prevCubes.map(c => {
+        if (c.id === id) {
+          const updated = { ...c, ...updates };
+          console.log('[updateCubeAndSync] ✏️ Updated cube:', {
+            id,
+            oldTexture: c.texture,
+            newTexture: updated.texture,
+            isTerrain: updated.isTerrain,
+            allUpdates: updates
+          });
+          return updated;
+        }
+        // If this cube is parented to the updated cube, update its position/scale too
+        if (c.parentId === id && (updates.position || updates.scale)) {
+          const parent = { ...prevCubes.find(p => p.id === id), ...updates };
+          if (parent) {
+            let newChildScale = c.scale;
+            
+            // Recalculate child collision scale based on new parent scale and bounds
+            if (c.followParentScale && updates.scale && parent.modelBounds) {
+              const bounds = parent.modelBounds;
+              newChildScale = {
+                x: bounds.width * updates.scale.x,
+                y: bounds.height * updates.scale.y,
+                z: bounds.depth * updates.scale.z
+              };
+            }
+            
+            const updated = {
+              ...c,
+              position: updates.position ? { ...updates.position } : c.position,
+              scale: newChildScale
+            };
+            
+            console.log('[updateCubeAndSync] Updating child collision:', {
+              childId: c.id,
+              preservedShape: updated.shape,
+              preservedHasCollision: updated.hasCollision,
+              preservedColor: updated.color
+            });
+            
+            // Preserve ALL child properties (shape, hasCollision, color, etc.)
+            return updated;
+          }
+        }
+        return c;
+      });
+      
+      console.log('[updateCubeAndSync] 💾 New state:', newCubes.length, 'cubes');
+      console.log('[updateCubeAndSync] 🔍 Updated cube in new state:', newCubes.find(c => c.id === id));
+      
+      // Send update to opponent (transform completed - no throttle needed)
+      console.log('[updateCubeAndSync] 📡 Calling sendCubeUpdate');
+      sendCubeUpdate(newCubes);
+      
+      return newCubes;
+    });
+  }, [sendCubeUpdate]);
+  
+  // Helper: Add AI content to a specific AI Box by ID or label
+  const addAIContent = React.useCallback((boxIdentifier, contentData) => {
+    // Find box by ID or label
+    const box = placedCubes.find(c => 
+      c.isAIBox && (
+        c.id.toString().includes(boxIdentifier) || 
+        c.aiBoxLabel?.includes(boxIdentifier)
+      )
+    );
+    
+    if (!box) {
+      console.error(`❌ AI Box not found: ${boxIdentifier}`);
+      return false;
+    }
+    
+    console.log(`🤖 Adding AI content to ${box.aiBoxLabel || `Box ${box.id}`}`);
+    updateCubeAndSync(box.id, { aiContentData: contentData });
+    return true;
+  }, [placedCubes, updateCubeAndSync]);
+  
+  // Expose to window for easy testing/usage
+  React.useEffect(() => {
+    window.__CF_ADD_AI_CONTENT__ = addAIContent;
+    return () => delete window.__CF_ADD_AI_CONTENT__;
+  }, [addAIContent]);
+  
+  // Handler: Save AI Box title
+  const handleSaveAIBoxTitle = React.useCallback(() => {
+    if (!selectedCubeId) return;
+    
+    const selectedCube = placedCubes.find(c => c.id === selectedCubeId);
+    if (!selectedCube || !selectedCube.isAIBox) return;
+    
+    // Extract AI Box ID from current label
+    const currentLabel = selectedCube.aiBoxLabel || '';
+    const match = currentLabel.match(/AI Box #(\d+)/);
+    const boxId = match ? match[1] : selectedCube.id;
+    
+    // Build new label: "AI Box #<id> - <customTitle>" or just "AI Box #<id>" if no title
+    const newLabel = aiBoxEditTitle.trim() 
+      ? `AI Box #${boxId} - ${aiBoxEditTitle.trim()}`
+      : `AI Box #${boxId}`;
+    
+    console.log('💾 Saving AI Box title:', { oldLabel: currentLabel, newLabel });
+    console.log('💾 Saving AI Box prompt:', aiBoxEditPrompt);
+    
+    // Update the cube with new label and prompt
+    updateCubeAndSync(selectedCube.id, { 
+      aiBoxLabel: newLabel,
+      aiPrompt: aiBoxEditPrompt.trim()
+    });
+    
+    // Close editor
+    setAIBoxEditorOpen(false);
+    setSelectedCubeId(null);
+    
+    // Broadcast restart countdown to all players via onAvatarMove callback
+    // The server will broadcast this back to ALL players (including us) to keep everyone in sync
+    if (onAvatarMove) {
+      console.log('🔄 [RESTART] Broadcasting countdown to server...');
+      // Mark this player as the initiator so they trigger the actual restart
+      window.__CF_RESTART_INITIATOR__ = true;
+      const message = {
+        type: 'server-restart-countdown',
+        countdown: 5
+      };
+      console.log('🔄 [RESTART] Calling onAvatarMove with:', message);
+      onAvatarMove(message);
+      console.log('🔄 [RESTART] onAvatarMove called successfully');
+      
+      // ALSO trigger locally immediately so the initiating player sees feedback
+      // The broadcast will come back and sync both players
+      console.log('🔄 [RESTART] Also triggering local countdown for immediate feedback');
+      window.dispatchEvent(new CustomEvent('cf:server-restart-countdown', { 
+        detail: { countdown: 5 } 
+      }));
+    } else {
+      console.error('🔄 [RESTART] ERROR: onAvatarMove is not available!');
+      // Fallback: trigger locally even if no network
+      console.log('🔄 [RESTART] Fallback: triggering local countdown only');
+      window.__CF_RESTART_INITIATOR__ = true;
+      window.dispatchEvent(new CustomEvent('cf:server-restart-countdown', { 
+        detail: { countdown: 5 } 
+      }));
+    }
+    
+    // NOTE: We don't start the countdown locally anymore
+    // We wait for the server broadcast to come back to ensure both players are perfectly synchronized
+  }, [selectedCubeId, placedCubes, aiBoxEditTitle, aiBoxEditPrompt, updateCubeAndSync, onAvatarMove]);
+  
+  // ===== TERRAIN SCULPTING =====
+  const handleSculpt = useCallback((terrainId, worldPosition, brushSize, delta) => {
+    console.log('[SCULPT] At X:', worldPosition.x.toFixed(2), 'Z:', worldPosition.z.toFixed(2), 'delta:', delta.toFixed(2));
+    
+    // Save current state to history before modifying
+    setPlacedCubes(prevCubes => {
+      const currentTerrain = prevCubes.find(c => c.id === terrainId);
+      if (!currentTerrain || !currentTerrain.isTerrain) {
+        return prevCubes;
+      }
+      
+      // Save the current state to history
+      setSculptHistory(prevHistory => [...prevHistory, {
+        terrainId,
+        previousModifications: currentTerrain.heightModifications ? [...currentTerrain.heightModifications] : []
+      }]);
+      
+      // Apply the new modification
+      return prevCubes.map(cube => {
+        if (cube.id !== terrainId || !cube.isTerrain) return cube;
+        
+        // Initialize height modifications array if it doesn't exist
+        const modifications = cube.heightModifications || [];
+        
+        // Convert world position to local position relative to terrain
+        const cosY = Math.cos(cube.rotation.y);
+        const sinY = Math.sin(cube.rotation.y);
+        
+        // Transform world position to local space
+        const dx = worldPosition.x - cube.position.x;
+        const dz = worldPosition.z - cube.position.z;
+        const localX = dx * cosY + dz * sinY;
+        const localZ = -dx * sinY + dz * cosY;
+        
+        // Add new modification in local coordinates
+        modifications.push({
+          x: localX,
+          z: localZ,
+          radius: brushSize,
+          delta: delta
+        });
+        
+        return { ...cube, heightModifications: modifications };
+      });
+    });
+  }, []);
+  
+  // Undo last sculpt operation
+  const undoSculpt = useCallback(() => {
+    if (sculptHistory.length === 0) return;
+    
+    setSculptHistory(prevHistory => {
+      const newHistory = [...prevHistory];
+      const lastAction = newHistory.pop();
+      
+      // Restore previous state
+      setPlacedCubes(prevCubes => {
+        return prevCubes.map(cube => {
+          if (cube.id === lastAction.terrainId) {
+            return { ...cube, heightModifications: lastAction.previousModifications };
+          }
+          return cube;
+        });
+      });
+      
+      return newHistory;
+    });
+  }, [sculptHistory]);
+  
+  // Clear all sculpts from selected terrain
+  const clearAllSculpts = useCallback(() => {
+    if (!selectedCubeId) return;
+    
+    setPlacedCubes(prevCubes => {
+      return prevCubes.map(cube => {
+        if (cube.id === selectedCubeId && cube.isTerrain) {
+          return { ...cube, heightModifications: [] };
+        }
+        return cube;
+      });
+    });
+    
+    // Clear history too
+    setSculptHistory([]);
+  }, [selectedCubeId]);
+  
+  // Listen for Ctrl+Z when in sculpt mode
+  useEffect(() => {
+    if (!sculptMode) return;
+    
+    const handleKeyDown = (e) => {
+      if ((e.ctrlKey || e.metaKey) && e.key === 'z') {
+        e.preventDefault();
+        undoSculpt();
+      }
+    };
+    
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [sculptMode, undoSculpt]);
   
   // ===== AUDIO VISUALIZER SYNC FUNCTIONS =====
   const sendVisualizerUpdate = useCallback((visualizers) => {
@@ -10820,10 +13620,31 @@ export default function ConnectFour3DView({ board, lastMove, colors, onSelectCol
   const duplicateCube = React.useCallback((id) => {
     const cube = placedCubes.find(c => c.id === id);
     if (!cube) return;
+    
+    // For terrain floors, keep the same position; for other objects, offset slightly
+    const positionOffset = cube.isTerrain ? { ...cube.position } : { ...cube.position, x: cube.position.x + 2 };
+    
     const newCube = {
       ...cube,
       id: Date.now() + Math.random(),
-      position: { ...cube.position, x: cube.position.x + 2 } // offset slightly
+      position: positionOffset,
+      // Clear snap data for duplicated terrain (it should not be pre-snapped)
+      snappedTo: null,
+      snappedEdge: null,
+      // Deep copy all terrain-specific properties
+      scale: cube.scale ? { ...cube.scale } : undefined,
+      rotation: cube.rotation ? { ...cube.rotation } : undefined,
+      terrainScale: cube.terrainScale,
+      terrainHeightMultiplier: cube.terrainHeightMultiplier,
+      terrainMoundScale: cube.terrainMoundScale,
+      terrainMoundMultiplier: cube.terrainMoundMultiplier,
+      terrainOctaves: cube.terrainOctaves,
+      terrainEdgeBlend: cube.terrainEdgeBlend,
+      terrainSegments: cube.terrainSegments,
+      hasTerrainNoise: cube.hasTerrainNoise,
+      hasWireframe: cube.hasWireframe,
+      textureType: cube.textureType,
+      customTexturePath: cube.customTexturePath
     };
     const newCubes = [...placedCubes, newCube];
     setPlacedCubes(newCubes);
@@ -10832,6 +13653,105 @@ export default function ConnectFour3DView({ board, lastMove, colors, onSelectCol
     // Send immediate update (no throttle for discrete operations)
     sendCubeUpdate(newCubes);
   }, [placedCubes, sendCubeUpdate]);
+  
+  // Event handler for controller sub-menu item activation (buttons/toggles inside placed objects)
+  useEffect(() => {
+    const handleSubMenuItemActivate = (e) => {
+      const { objectIndex, subItem } = e.detail;
+      console.log('🎮 Sub-menu item activated:', { objectIndex, subItem });
+      
+      // Get the placed object (items 4+ map to placedCubes array, excluding terrain)
+      const objIndex = objectIndex - 4;
+      const placedObjects = placedCubes.filter(c => !c.parentId && !c.isTerrain);
+      if (objIndex < 0 || objIndex >= placedObjects.length) {
+        console.error('Invalid object index:', objectIndex);
+        return;
+      }
+      
+      const cube = placedObjects[objIndex];
+      console.log('🎮 Operating on cube:', cube.id);
+      
+      // Sub-item mapping:
+      // 0 = Duplicate button
+      // 1 = Delete button
+      // 2 = Collision checkbox
+      // 3 = Walkable checkbox
+      // 4 = Box collision shape
+      // 5 = Sphere collision shape
+      // 6 = Cylinder collision shape
+      
+      if (subItem === 0) {
+        // Duplicate
+        console.log('🎮 Duplicating cube:', cube.id);
+        duplicateCube(cube.id);
+      } else if (subItem === 1) {
+        // Delete
+        console.log('🎮 Deleting cube:', cube.id);
+        deleteCube(cube.id);
+      } else if (subItem === 2) {
+        // Toggle Collision checkbox
+        console.log('🎮 Toggling collision for cube:', cube.id, 'current:', cube.hasCollision);
+        updateCubeAndSync(cube.id, { hasCollision: !cube.hasCollision });
+      } else if (subItem === 3) {
+        // Toggle Walkable checkbox
+        console.log('🎮 Toggling walkable for cube:', cube.id, 'current:', cube.walkableTop);
+        updateCubeAndSync(cube.id, { walkableTop: !cube.walkableTop });
+      } else if (subItem >= 4 && subItem <= 6) {
+        // Collision shape buttons (Box, Sphere, Cylinder)
+        const shapes = ['box', 'sphere', 'cylinder'];
+        const shape = shapes[subItem - 4];
+        console.log('🎮 Setting collision shape:', shape);
+        
+        // Find existing collision layer
+        const existingCollision = placedCubes.find(c => c.parentId === cube.id);
+        
+        // Use actual model bounds if available, otherwise estimate
+        const bounds = cube.modelBounds || { width: 100, height: 100, depth: 100 };
+        const scaleX = cube.scale.x || 0.1;
+        const scaleY = cube.scale.y || 0.1;
+        const scaleZ = cube.scale.z || 0.1;
+        
+        const worldWidth = bounds.width * scaleX;
+        const worldHeight = bounds.height * scaleY;
+        const worldDepth = bounds.depth * scaleZ;
+        
+        if (existingCollision) {
+          // Update existing collision
+          updateCubeAndSync(existingCollision.id, { 
+            shape,
+            scale: { x: worldWidth, y: worldHeight, z: worldDepth }
+          });
+        } else {
+          // Create new collision layer
+          const newId = `collision-${cube.id}-${Date.now()}`;
+          const newCube = {
+            id: newId,
+            shape,
+            modelType: 'none',
+            position: { ...cube.position },
+            rotation: { x: 0, y: 0, z: 0 },
+            scale: { x: worldWidth, y: worldHeight, z: worldDepth },
+            color: '#a855f7',
+            hasCollision: true,
+            walkableTop: false,
+            parentId: cube.id,
+            followParentScale: true
+          };
+          
+          const newCubes = [...placedCubes, newCube];
+          setPlacedCubes(newCubes);
+          sendCubeUpdate(newCubes);
+        }
+      }
+    };
+    
+    console.log('🎯 Setting up controllerSubMenuItemActivate event listener');
+    window.addEventListener('controllerSubMenuItemActivate', handleSubMenuItemActivate);
+    return () => {
+      console.log('🎯 Removing controllerSubMenuItemActivate event listener');
+      window.removeEventListener('controllerSubMenuItemActivate', handleSubMenuItemActivate);
+    };
+  }, [placedCubes, duplicateCube, deleteCube, updateCubeAndSync, sendCubeUpdate]);
   
   const [extraAlign, setExtraAlign] = useState(true);
   const [extraSide, setExtraSide] = useState('left'); // matches current scene usage
@@ -11052,8 +13972,8 @@ export default function ConnectFour3DView({ board, lastMove, colors, onSelectCol
 
   
   // Zoom ranges (more zoom out by default; very long when fullCamera)
-  const minDist = fullCamera ? 0.01 : (isNarrow ? 10 : 9);
-  const maxDist = fullCamera ? 2000 : (isNarrow ? 60 : 40);
+  const minDist = fullCamera ? 0.0001 : (isNarrow ? 10 : 9);
+  const maxDist = fullCamera ? 100000 : (isNarrow ? 60 : 40);
   // Position the HUD below the navbar
   const hudTop = isNarrow ? 76 : 64;
 
@@ -11072,11 +13992,12 @@ export default function ConnectFour3DView({ board, lastMove, colors, onSelectCol
   const GRID_H = ROWS * (CELL + GAP) - GAP;
   const groupY = (GRID_H + 0.6) / 2 + 0.15;
   
-  // Camera target - focus on selected object when editing, otherwise board center
+  // Camera target - focus on selected object when editing, otherwise board center (or player in full camera mode)
   const cameraTarget = useMemo(() => {
-    // When editing a cube/object, center camera on that object (even in fullCamera mode)
-    if (cubeEditMode && selectedCubeId && placedCubes.length > 0) {
-      const selectedCube = placedCubes.find(c => c.id === selectedCubeId);
+    // When a cube/object is selected, center camera on that object (even in fullCamera mode)
+    if (selectedCubeId) {
+      // Use CURRENT_PLACED_CUBES cache instead of state to avoid unnecessary recalculations
+      const selectedCube = CURRENT_PLACED_CUBES.find(c => c.id === selectedCubeId);
       if (selectedCube && selectedCube.position) {
         return [selectedCube.position.x, selectedCube.position.y, selectedCube.position.z];
       }
@@ -11088,9 +14009,17 @@ export default function ConnectFour3DView({ board, lastMove, colors, onSelectCol
         return [selectedViz.position[0], selectedViz.position[1], selectedViz.position[2]];
       }
     }
+    // In full camera mode, target the player
+    if (fullCamera) {
+      const avatar = window.__CF_LOCAL_AVATAR__;
+      if (avatar && Number.isFinite(avatar.x) && Number.isFinite(avatar.z)) {
+        const playerY = (typeof avatar.lift === 'number' && avatar.lift > 0) ? avatar.lift : 5;
+        return [avatar.x, playerY, avatar.z];
+      }
+    }
     // Default to board center
     return [0, groupY, 0];
-  }, [groupY, cubeEditMode, selectedCubeId, placedCubes, selectedVisualizer, audioVisualizers]);
+  }, [groupY, selectedCubeId, selectedVisualizer, audioVisualizers, fullCamera]);
   
   // Compute a local Y offset so the board (base at -fh/2) rests on the table top (published by WoodenTable)
   const fhBoard = GRID_H + 0.6; // same as fh in FrontPlate/SideSupports
@@ -11130,6 +14059,9 @@ export default function ConnectFour3DView({ board, lastMove, colors, onSelectCol
 
   // Player-specific avatar URLs (Player 2 shark kept for now)
   const player2Url = '/models/avatars/shark/scene.gltf';
+  
+  // Constant array references to prevent unnecessary re-renders
+  const ZERO_POSITION = useMemo(() => [0, 0, 0], []);
 
   // Precompute positions for both player avatars (consistent regardless of camera side)
   const avatarZ = Math.abs(AVATAR_BAKED_POS[2]);
@@ -11249,7 +14181,7 @@ export default function ConnectFour3DView({ board, lastMove, colors, onSelectCol
     // Skip auto-centering in free camera mode to preserve user's view
     const id = setTimeout(() => { try { if (!fullCamera && !cubeEditMode) centerThirdPerson(); } catch {} }, 160);
     return () => { try { clearTimeout(id); } catch {} };
-  }, [showSelf, fullCamera, cubeEditMode, centerThirdPerson, youArePlayer2, player1Pos.x, player1Pos.z, player2Pos.x, player2Pos.z]);
+  }, [showSelf, fullCamera, centerThirdPerson, youArePlayer2, player1Pos.x, player1Pos.z, player2Pos.x, player2Pos.z]);
 
   // Click-to-move target for the local player (world XZ). Separate state for P1/P2 for clarity.
   const [p1Target, setP1Target] = useState(null);
@@ -11316,6 +14248,36 @@ export default function ConnectFour3DView({ board, lastMove, colors, onSelectCol
       }
     } catch {}
   }, [youArePlayer2, player1Pos.x, player1Pos.z, player2Pos.x, player2Pos.z, fullCamera]);
+
+  // Cinematic post-processing effects for space environment
+  const SpaceEffects = React.memo(function SpaceEffects() {
+    return (
+      <EffectComposer>
+        {/* Bloom: Makes stars, lights, and glowing objects radiate beautifully */}
+        <Bloom
+          intensity={1.2}
+          luminanceThreshold={0.2}
+          luminanceSmoothing={0.9}
+          mipmapBlur
+          radius={0.9}
+        />
+        
+        {/* Chromatic Aberration: Subtle lens distortion for cinematic space feel */}
+        <ChromaticAberration
+          blendFunction={BlendFunction.NORMAL}
+          offset={[0.0015, 0.0015]}
+        />
+        
+        {/* Vignette: Darkens edges for cinematic focus */}
+        <Vignette
+          offset={0.3}
+          darkness={0.6}
+          eskil={false}
+          blendFunction={BlendFunction.NORMAL}
+        />
+      </EffectComposer>
+    );
+  });
 
   // Canvas-aware controls wrapper to avoid constructing OrbitControls before camera exists
   // Memoized to prevent unnecessary re-renders that could reset camera position
@@ -11426,6 +14388,7 @@ export default function ConnectFour3DView({ board, lastMove, colors, onSelectCol
       ref: controlsRef,
       makeDefault: true,
       enablePan: fullCamera,
+      panSpeed: fullCamera ? 2.0 : 1.0,
       enableKeys: false,
       enableDamping: true,
       dampingFactor: 0.12,
@@ -11434,16 +14397,23 @@ export default function ConnectFour3DView({ board, lastMove, colors, onSelectCol
       enableRotate: true,
       enableZoom: true,
       zoomToCursor: fullCamera,
-      zoomSpeed: 1.0,
+      zoomSpeed: fullCamera ? 0.5 : 1.0,
+      // Remove ALL limits in full camera mode
+      ...(fullCamera ? {
+        minPolarAngle: 0,
+        maxPolarAngle: Math.PI,
+        minAzimuthAngle: -Infinity,
+        maxAzimuthAngle: Infinity
+      } : {}),
       // Add target when in edit mode (cube or visualizer) OR not in fullCamera mode
       ...((fullCamera && !selectedCubeId && !selectedVisualizer) ? {} : { target }),
-      // Only add angle constraints when NOT in fullCamera or followCam mode
-      ...((fullCamera || followCam) ? {} : { 
+      // Only add angle constraints when NOT in fullCamera or followCam mode (non-fullCamera modes)
+      ...(!fullCamera && !followCam ? { 
         minPolarAngle: (isNarrow ? 0.06 : 0.08), 
         maxPolarAngle: Math.PI * 0.5,
         minAzimuthAngle: (flip180 ? Math.PI - Math.PI*0.25 : -Math.PI*0.25), 
         maxAzimuthAngle: (flip180 ? Math.PI + Math.PI*0.25 : Math.PI*0.25)
-      })
+      } : {})
     };
     
     return (
@@ -11477,155 +14447,6 @@ export default function ConnectFour3DView({ board, lastMove, colors, onSelectCol
     );
   });
 
-  // Internal helper: runs inside Canvas so we can use useFrame safely
-  function RemoteAvatarGroup({ side, base, children }){
-    const gref = useRef();
-    const pos = useRef({ x: base.x, z: base.z });
-    const target = useRef({ x: base.x, z: base.z, has: false });
-    const yawRef = useRef(0);            // current rotation Y (unwrapped radians)
-    const yawTargetRef = useRef(null);   // target yaw (unwrapped)
-    // Track last server target and timing to derive walking state without relying on smoothing residuals
-    const lastTargetPos = useRef({ x: base.x, z: base.z });
-    const lastMoveAtRef = useRef(0);
-    const lastMsgAtRef = useRef(0);
-    const lastRunRef = useRef(false);
-    const lastJumpRef = useRef(false);
-    const lastLiftRef = useRef(0);
-  const [isWalking, setIsWalking] = useState(false);
-  const [isRunning, setIsRunning] = useState(false);
-  const [isTurningLeft, setIsTurningLeft] = useState(false);
-  const [isTurningRight, setIsTurningRight] = useState(false);
-  const [isJumpingRemote, setIsJumpingRemote] = useState(false);
-  const [liftRemote, setLiftRemote] = useState(0);
-    // Track yaw velocity to infer turning when idle
-    const prevYawRef = useRef(0);
-    const prevYawTsRef = useRef(0);
-    const norm = (a)=>{ let v=(a+Math.PI)%(2*Math.PI); if(v<0) v+=2*Math.PI; return v-Math.PI; };
-    const unwrapToNear = (wrapped, near)=>{ const w = norm(wrapped); const k = Math.round((near - w)/(2*Math.PI)); return w + k*2*Math.PI; };
-    // Initialize from any cached global to avoid visual snap on rare remounts
-    useLayoutEffect(() => {
-      try {
-        const msg = window.__CF_REMOTE_AVATAR__;
-        if (msg && msg.side === side && Number.isFinite(msg.x) && Number.isFinite(msg.z)) {
-          pos.current = { x: Number(msg.x), z: Number(msg.z) };
-          if (typeof msg.yaw === 'number' && Number.isFinite(msg.yaw)) {
-            const yw = norm(Number(msg.yaw));
-            yawRef.current = yw; yawTargetRef.current = yw;
-            prevYawRef.current = yw; prevYawTsRef.current = performance.now();
-          }
-          // Initialize lift from cached value to preserve height on hot reload
-          if (typeof msg.lift === 'number' && Number.isFinite(msg.lift)) {
-            lastLiftRef.current = Number(msg.lift);
-            setLiftRemote(Number(msg.lift));
-          }
-        }
-      } catch {}
-    }, [side, base.x, base.z]);
-  useFrame((_, delta) => {
-      try {
-        const msg = window.__CF_REMOTE_AVATAR__;
-        if (msg && msg.side === side) {
-          const tx = Number(msg.x); const tz = Number(msg.z);
-          if (Number.isFinite(tx) && Number.isFinite(tz)) {
-            target.current = { x: tx, z: tz, has: true };
-            // Update timing and movement detection from raw server targets (not smoothed)
-            const dxT = tx - lastTargetPos.current.x;
-            const dzT = tz - lastTargetPos.current.z;
-            const moved2 = dxT*dxT + dzT*dzT;
-            // mark as moving when the server-reported target changes meaningfully
-            if (moved2 > 1e-6) {
-              lastMoveAtRef.current = performance.now();
-              lastTargetPos.current.x = tx; lastTargetPos.current.z = tz;
-            }
-            lastMsgAtRef.current = performance.now();
-          }
-          if (typeof msg.yaw === 'number' && Number.isFinite(msg.yaw)) {
-            const prev = (typeof yawTargetRef.current === 'number') ? yawTargetRef.current : yawRef.current || 0;
-            yawTargetRef.current = unwrapToNear(Number(msg.yaw), prev);
-          }
-          if (typeof msg.run === 'boolean') {
-            lastRunRef.current = !!msg.run;
-          }
-          if (typeof msg.isJumping === 'boolean') {
-            lastJumpRef.current = !!msg.isJumping;
-          }
-          if (typeof msg.lift === 'number' && Number.isFinite(msg.lift)) {
-            lastLiftRef.current = Number(msg.lift);
-          }
-        }
-        const alpha = Math.min(1, delta * 10.0);
-        const tx = target.current.has ? target.current.x : pos.current.x;
-        const tz = target.current.has ? target.current.z : pos.current.z;
-        pos.current.x += (tx - pos.current.x) * alpha;
-        pos.current.z += (tz - pos.current.z) * alpha;
-        // Smoothly rotate toward target yaw using unwrapped angles to avoid wrap spinning
-        if (typeof yawTargetRef.current === 'number') {
-          const cur = yawRef.current;
-          const tgt = yawTargetRef.current;
-          const rotAlpha = Math.min(1, delta * 10.0);
-          yawRef.current = cur + (tgt - cur) * rotAlpha;
-        }
-        if (gref.current) {
-          // Place group at world XZ position; Y=0 since child avatar handles its own Y via extraLiftY
-          // Child avatar positions itself at: groundY + py + extraLiftY (which is liftRemote)
-          gref.current.position.set(pos.current.x, 0, pos.current.z);
-          gref.current.rotation.y = norm(yawRef.current || 0);
-        }
-  // Update walk/run animation state: prefer server-run; walk based on recent move updates, not smoothing residual
-        const now = performance.now();
-        const running = !!lastRunRef.current;
-        const WALK_GRACE_MS = 85; // short grace so opponent stops nearly instantly
-        const walking = running || ((now - lastMoveAtRef.current) < WALK_GRACE_MS);
-        if (walking !== isWalking) setIsWalking(walking);
-        if (running !== isRunning) setIsRunning(running);
-  // Remote jump/lift
-  const newJump = !!lastJumpRef.current;
-  const newLift = Number(lastLiftRef.current) || 0;
-  if (newJump !== isJumpingRemote) setIsJumpingRemote(newJump);
-  if (Math.abs(newLift - liftRemote) > 0.00001) setLiftRemote(newLift);
-        // Turning detection when idle: compute yaw velocity
-        const prevTs = prevYawTsRef.current || now - Math.max(1, delta*1000);
-        const dtMs = Math.max(1, now - prevTs);
-        const dtSec = dtMs / 1000;
-        const yawVel = (yawRef.current - prevYawRef.current) / dtSec; // rad/s
-        const TURN_THRESH = 0.5; // rad/s threshold
-        const turningL = !walking && (yawVel > TURN_THRESH);
-        const turningR = !walking && (yawVel < -TURN_THRESH);
-        if (turningL !== isTurningLeft) setIsTurningLeft(turningL);
-        if (turningR !== isTurningRight) setIsTurningRight(turningR);
-        prevYawRef.current = yawRef.current;
-        prevYawTsRef.current = now;
-      } catch {}
-    });
-    // Remove smoothed-displacement-based walking detection to avoid lingering walk after stop
-    // Inject motion props into the first child (avatar), preserve other children (e.g., label)
-    const withMotionChildren = useMemo(() => {
-      const arr = React.Children.toArray(children);
-      if (arr.length > 0 && React.isValidElement(arr[0])) {
-        try {
-          arr[0] = React.cloneElement(arr[0], { isWalking, isRunning, isTurningLeft, isTurningRight, isJumping: isJumpingRemote, extraLiftY: liftRemote });
-        } catch {}
-      }
-      // Also update Billboard position to include liftRemote height
-      if (arr.length > 1 && React.isValidElement(arr[1])) {
-        try {
-          const billboard = arr[1];
-          // Check if this is a Billboard with a position prop
-          if (billboard.props && billboard.props.position) {
-            const [x, y, z] = billboard.props.position;
-            // Add liftRemote to the Y position
-            arr[1] = React.cloneElement(billboard, {
-              ...billboard.props,
-              position: [x, y + liftRemote, z]
-            });
-          }
-        } catch {}
-      }
-      return arr;
-    }, [children, isWalking, isRunning, isTurningLeft, isTurningRight, isJumpingRemote, liftRemote]);
-    return <group ref={gref}>{withMotionChildren}</group>;
-  }
-
   // Simple smooth camera follower - stays behind the character
   function CameraFollower({ seedToken = 0, isPlayer2 = false, followRocket = false, rocketPositionRef = null, cameraDistance = 50, cameraHeight = 15 }){
     const { camera, gl } = useThree();
@@ -11642,6 +14463,7 @@ export default function ConnectFour3DView({ board, lastMove, colors, onSelectCol
     const lastCameraDistance = useRef(cameraDistance);
     const lastCameraHeight = useRef(cameraHeight);
     const isFirstFrame = useRef(true);
+    const lastManualControlTime = useRef(0); // Track when user last manually controlled camera
     
     // Detect when camera settings change and skip lerp to avoid snap effect
     const settingsChanged = useRef(false);
@@ -11683,6 +14505,9 @@ export default function ConnectFour3DView({ board, lastMove, colors, onSelectCol
           const deltaY = e.clientY - lastMouseY.current;
           lastMouseX.current = e.clientX;
           lastMouseY.current = e.clientY;
+          
+          // Track that user is manually controlling camera
+          lastManualControlTime.current = Date.now();
           
           // Horizontal: drag left/right to orbit around character (inverted for natural feel)
           horizontalAngle.current -= deltaX * 0.005;
@@ -11732,6 +14557,9 @@ export default function ConnectFour3DView({ board, lastMove, colors, onSelectCol
           
           // Apply right stick to camera angles
           if (rightX !== 0 || rightY !== 0) {
+            // Track that user is manually controlling camera
+            lastManualControlTime.current = Date.now();
+            
             // Horizontal: right stick left/right - DISABLED (character turning only)
             // horizontalAngle.current -= rightX * 0.3 * dt;
             
@@ -11807,7 +14635,11 @@ export default function ConnectFour3DView({ board, lastMove, colors, onSelectCol
         lastPosition.current = { x: msg.x, z: msg.z };
         
         // If moving and not dragging, slowly drift camera angles back to default
-        if (isMoving.current && !isDragging.current) {
+        // BUT only if the user hasn't manually controlled the camera in the last 5 seconds
+        const timeSinceManualControl = Date.now() - lastManualControlTime.current;
+        const allowAutoReset = timeSinceManualControl > 5000; // 5 second cooldown
+        
+        if (isMoving.current && !isDragging.current && allowAutoReset) {
           // Smoothly return vertical angle to 0 (neutral)
           verticalAngle.current = THREE.MathUtils.lerp(verticalAngle.current, 0, dt * 0.8);
           // Smoothly return horizontal angle to 0 (behind character)
@@ -12034,6 +14866,7 @@ export default function ConnectFour3DView({ board, lastMove, colors, onSelectCol
         </div>
       )}
       
+      
       {/* No tweak panel; avatars share identical placement */}
       <div style={{ position:'absolute', inset:0, zIndex: 1000 }}>
         {/* View button icon for Tools - centered above button */}
@@ -12042,8 +14875,8 @@ export default function ConnectFour3DView({ board, lastMove, colors, onSelectCol
           alt="View Button"
           style={{ 
             position: 'fixed',
-            bottom: 'calc(var(--footer-h, 52px) + 56px)', // Above the button
-            left: 'calc(10px + 55px - 16px)', // Center of Tools button (10px + half button width - half icon width)
+            bottom: 'calc(var(--footer-h, 52px) + 56px)',
+            left: 'calc(50% - 177px + 55px - 16px)', // Button left + half button width - half icon width
             width: '32px', 
             height: '32px',
             zIndex: 2147483648,
@@ -12058,8 +14891,8 @@ export default function ConnectFour3DView({ board, lastMove, colors, onSelectCol
           alt="D-Pad Right"
           style={{ 
             position: 'fixed',
-            bottom: 'calc(var(--footer-h, 52px) + 56px)', // Above the button
-            left: 'calc(10px + 110px + 8px + 55px - 16px)', // Center of Chat button
+            bottom: 'calc(var(--footer-h, 52px) + 56px)',
+            left: 'calc(50% - 59px + 55px - 16px)', // Button left + half button width - half icon width
             width: '32px', 
             height: '32px',
             zIndex: 2147483648,
@@ -12074,8 +14907,8 @@ export default function ConnectFour3DView({ board, lastMove, colors, onSelectCol
           alt="D-Pad Up"
           style={{ 
             position: 'fixed',
-            bottom: 'calc(var(--footer-h, 52px) + 56px)', // Above the button
-            left: 'calc(10px + 110px + 8px + 110px + 8px + 55px - 16px)', // Center of Camera button
+            bottom: 'calc(var(--footer-h, 52px) + 56px)',
+            left: 'calc(50% + 59px + 55px - 16px)', // Button left + half button width - half icon width
             width: '32px', 
             height: '32px',
             zIndex: 2147483648,
@@ -12084,13 +14917,13 @@ export default function ConnectFour3DView({ board, lastMove, colors, onSelectCol
           }}
         />
         
-        {/* Toggle button for edit menu - positioned at bottom-left, below where menu ends */}
+        {/* Toggle button for edit menu - centered at bottom */}
         <button 
           onClick={() => setShowEditMenu(!showEditMenu)}
           style={{
             position: 'fixed',
             bottom: 'calc(var(--footer-h, 52px) + 8px)',
-            left: 10,
+            left: 'calc(50% - 177px)', // Centered: 50% minus half of total width (110+8+110+8+110)/2
             zIndex: 2147483648,
             background: showEditMenu ? 'rgba(59,130,246,0.9)' : 'rgba(15,23,42,0.75)',
             padding: '10px 14px',
@@ -12108,13 +14941,107 @@ export default function ConnectFour3DView({ board, lastMove, colors, onSelectCol
           {showEditMenu ? '⚙️ Tools On' : '⚙️ Tools Off'}
         </button>
         
-        {/* Toggle button for chat UI - positioned to the right of tools button */}
+        {/* Server Status Toggle - top center */}
+        <button 
+          onClick={() => setShowServerStatus(!showServerStatus)}
+          style={{
+            position: 'fixed',
+            top: 'calc(var(--nav-height, 56px) + 8px)',
+            left: '50%',
+            transform: 'translateX(-50%)',
+            zIndex: 2147483647,
+            background: restartCountdown !== null && restartCountdown !== 'reconnected' 
+              ? 'rgba(251,191,36,0.9)' 
+              : serverStatus === 'online' ? 'rgba(34,197,94,0.9)' : serverStatus === 'offline' ? 'rgba(239,68,68,0.9)' : 'rgba(251,191,36,0.9)',
+            padding: '4px 10px',
+            borderRadius: 5,
+            color: '#fff',
+            fontSize: 11,
+            fontWeight: 600,
+            cursor: 'pointer',
+            border: '1px solid rgba(255,255,255,0.3)',
+            boxShadow: '0 2px 8px rgba(0,0,0,0.3)',
+            backdropFilter: 'blur(4px)',
+            transition: 'all 0.2s ease',
+            display: 'flex',
+            alignItems: 'center',
+            gap: 4
+          }}
+        >
+          <span style={{ fontSize: 12 }}>
+            {restartCountdown !== null && restartCountdown !== 'reconnected' 
+              ? (typeof restartCountdown === 'number' ? '🔄' : restartCountdown === 'disconnected' ? '⚠️' : '🔌')
+              : serverStatus === 'online' ? '🟢' : serverStatus === 'offline' ? '🔴' : '🟡'}
+          </span>
+          {restartCountdown !== null && restartCountdown !== 'reconnected'
+            ? (typeof restartCountdown === 'number' ? `Restarting ${restartCountdown}` : restartCountdown === 'disconnected' ? 'Disconnected' : 'Reconnecting')
+            : serverStatus === 'online' ? 'Online' : serverStatus === 'offline' ? 'Offline' : 'Checking'}
+        </button>
+        
+        {/* Server Status Details Panel */}
+        {showServerStatus && (
+          <div style={{
+            position: 'fixed',
+            top: 'calc(var(--nav-height, 56px) + 42px)',
+            left: '50%',
+            transform: 'translateX(-50%)',
+            zIndex: 2147483646,
+            background: 'rgba(15, 23, 42, 0.95)',
+            border: '2px solid rgba(100, 116, 139, 0.5)',
+            borderRadius: '8px',
+            padding: '16px',
+            minWidth: '280px',
+            boxShadow: '0 8px 32px rgba(0,0,0,0.5)',
+            backdropFilter: 'blur(10px)',
+            fontFamily: 'monospace',
+            fontSize: 13,
+            color: '#e2e8f0'
+          }}>
+            <div style={{ marginBottom: '12px', fontSize: 16, fontWeight: 'bold', borderBottom: '1px solid rgba(100,116,139,0.3)', paddingBottom: '8px' }}>
+              🖥️ Server Status
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                <span>Status:</span>
+                <span style={{ 
+                  color: serverStatus === 'online' ? '#22c55e' : serverStatus === 'offline' ? '#ef4444' : '#fbbf24',
+                  fontWeight: 'bold' 
+                }}>
+                  {serverStatus === 'online' ? '● ONLINE' : serverStatus === 'offline' ? '● OFFLINE' : '● CHECKING'}
+                </span>
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                <span>Endpoint:</span>
+                <span style={{ color: '#94a3b8' }}>:3002</span>
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                <span>Type:</span>
+                <span style={{ color: '#94a3b8' }}>API + WebSocket</span>
+              </div>
+            </div>
+            {serverStatus === 'offline' && (
+              <div style={{
+                marginTop: 12,
+                padding: 8,
+                background: 'rgba(239,68,68,0.1)',
+                border: '1px solid rgba(239,68,68,0.3)',
+                borderRadius: 4,
+                fontSize: 11,
+                color: '#fca5a5'
+              }}>
+                ⚠️ Server is offline. Run: npm run serve:api
+              </div>
+            )}
+          </div>
+        )}
+        
+        {/* Toggle button for chat UI - centered at bottom */}
         <button 
           onClick={() => setShowChatUI(!showChatUI)}
           style={{
             position: 'fixed',
             bottom: 'calc(var(--footer-h, 52px) + 8px)',
-            left: 'calc(10px + 110px + 8px)', // 10px (left margin) + 110px (tools button width) + 8px (gap)
+            left: 'calc(50% - 59px)', // Centered
             zIndex: 2147483648,
             background: showChatUI ? 'rgba(34,197,94,0.9)' : 'rgba(15,23,42,0.75)',
             padding: '10px 14px',
@@ -12132,7 +15059,7 @@ export default function ConnectFour3DView({ board, lastMove, colors, onSelectCol
           {showChatUI ? '💬 Chat On' : '💬 Chat Off'}
         </button>
         
-        {/* Toggle button for camera mode - positioned to the right of chat button */}
+        {/* Toggle button for camera mode - centered at bottom */}
         <button 
           onClick={() => {
             setFullCamera(prev => {
@@ -12150,7 +15077,7 @@ export default function ConnectFour3DView({ board, lastMove, colors, onSelectCol
           style={{
             position: 'fixed',
             bottom: 'calc(var(--footer-h, 52px) + 8px)',
-            left: 'calc(10px + 110px + 8px + 110px + 8px)', // 10px + tools width + gap + chat width + gap
+            left: 'calc(50% + 59px)', // Centered
             zIndex: 2147483648,
             background: fullCamera ? 'rgba(168,85,247,0.9)' : 'rgba(15,23,42,0.75)',
             padding: '10px 14px',
@@ -12168,330 +15095,1938 @@ export default function ConnectFour3DView({ board, lastMove, colors, onSelectCol
           {fullCamera ? '📷 Full Cam' : '👤 3rd Person'}
         </button>
         
-        {/* Simple HUD for toggles (fixed below nav bar with more spacing) */}
+        {/* Professional Tabbed Editor Panel */}
         {showEditMenu && (
   <div style={{
             position:'fixed',
             top:'calc(var(--nav-height, 56px) + 16px)',
-            left:10,
+            left:16,
             zIndex: 2147483647,
-            background:'rgba(15,23,42,0.95)',
-            padding:'12px 14px',
-            borderRadius:8,
+            background:'rgba(15,23,42,0.98)',
+            borderRadius:16,
             color:'#e2e8f0',
-            fontSize:12,
+            boxShadow:'0 20px 60px rgba(0,0,0,0.6), 0 0 0 1px rgba(148, 163, 184, 0.15)',
+            backdropFilter:'blur(12px)',
+            border:'1px solid rgba(148, 163, 184, 0.2)',
+            width:380,
+            bottom: 0,
+            maxHeight: 'calc(100dvh - var(--nav-height, 56px))',
             display:'flex',
             flexDirection:'column',
-            gap:6,
-            boxShadow:'0 4px 12px rgba(0,0,0,0.35)',
-            backdropFilter:'blur(4px)',
-            // Make panel scrollable when it grows tall - leave space for toggle button at bottom (56px toggle + 60px footer + 16px gap)
-            maxHeight: 'calc(100dvh - var(--nav-height, 56px) - var(--footer-h, 52px) - 132px)',
-            overflowY:'auto',
-            overscrollBehavior:'contain'
+            overflow:'hidden'
           }}>
-          <label style={{ display:'flex', alignItems:'center', gap:6 }}>
-            <input type="checkbox" checked={showSelf} onChange={e=>setShowSelf(e.target.checked)} /> Show my character
-          </label>
-          <label style={{ display:'flex', alignItems:'center', gap:6 }}>
-            <input type="checkbox" checked={moveEnabled} onChange={e=>setMoveEnabled(e.target.checked)} disabled={!showSelf} /> Movement (arrows)
-          </label>
-          <label style={{ display:'flex', alignItems:'center', gap:6 }}>
-            <input type="checkbox" checked={clickMove} onChange={e=>setClickMove(e.target.checked)} disabled={!showSelf || !moveEnabled} /> Click-to-move
-          </label>
-          <label style={{ display:'flex', alignItems:'center', gap:6 }}>
-            <input type="checkbox" checked={fullCamera} onChange={e=>setFullCamera(e.target.checked)} /> Full camera controls
-          </label>
-          <label style={{ display:'flex', alignItems:'center', gap:6 }}>
-            <input type="checkbox" checked={followCam} onChange={e=>setFollowCam(e.target.checked)} /> 3rd-person follow (smooth)
-          </label>
-          <label style={{ display:'flex', alignItems:'center', gap:6 }}>
-            <input type="checkbox" checked={showCollisionMeshes} onChange={e=>setShowCollisionMeshes(e.target.checked)} /> Show collision meshes
-          </label>
-          {/* No on-screen animation controls */}
-          <button onClick={resetCamera} style={{ marginTop:4, padding:'4px 8px', borderRadius:6, border:'1px solid #334155', background:'#0f172a', color:'#e2e8f0', cursor:'pointer' }}>Reset Camera</button>
-          
-          {/* Leave game button */}
-          <div style={{ marginTop:8, paddingTop:6, borderTop:'1px solid #dc2626' }}>
-            <div style={{ fontWeight:600, color:'#ef4444', marginBottom:4 }}>⚠️ Leave Game</div>
-            <button 
-              onClick={leaveGame}
-              style={{ 
-                padding:'8px 12px', 
-                borderRadius:6, 
-                border:'2px solid #dc2626', 
-                background:'#991b1b', 
-                color:'#fff', 
-                cursor:'pointer',
-                fontSize: 12,
-                fontWeight: 600,
-                width: '100%'
-              }}
-            >
-              Leave Game & Disconnect
-            </button>
+          {/* Header with Tab Navigation */}
+          <div style={{ 
+            padding:'16px 20px 0 20px', 
+            background:'linear-gradient(135deg, rgba(59, 130, 246, 0.12), rgba(147, 51, 234, 0.12))',
+            borderBottom:'1px solid rgba(148, 163, 184, 0.15)'
+          }}>
+            <div style={{ display:'flex', justifyContent:'flex-end', alignItems:'center', marginBottom:12 }}>
+              <button 
+                onClick={() => setShowEditMenu(false)}
+                style={{
+                  padding:'6px 10px',
+                  borderRadius:6,
+                  border:'1px solid rgba(148, 163, 184, 0.2)',
+                  background:'rgba(30, 41, 59, 0.6)',
+                  color:'#cbd5e1',
+                  cursor:'pointer',
+                  fontSize:11,
+                  fontWeight:600
+                }}
+              >
+                ✕
+              </button>
+            </div>
+            
+            {/* Tab navigation - LB and RB */}
+            <div style={{ 
+              display:'flex', 
+              justifyContent:'space-between', 
+              alignItems:'center',
+              marginBottom:8
+            }}>
+              <div style={{ display:'flex', alignItems:'center', gap:6 }}>
+                <img 
+                  src="/controller icons/Buttons Solid/White/SVG/Left Bumper.svg" 
+                  alt="LB"
+                  style={{ 
+                    width: '24px', 
+                    height: '24px',
+                    filter: 'drop-shadow(0 2px 4px rgba(0,0,0,0.3))'
+                  }}
+                />
+                <span style={{ fontSize:10, color:'#94a3b8', fontWeight:500 }}>Previous Tab</span>
+              </div>
+              <div style={{ display:'flex', alignItems:'center', gap:6 }}>
+                <span style={{ fontSize:10, color:'#94a3b8', fontWeight:500 }}>Next Tab</span>
+                <img 
+                  src="/controller icons/Buttons Solid/White/SVG/Right Bumper.svg" 
+                  alt="RB"
+                  style={{ 
+                    width: '24px', 
+                    height: '24px',
+                    filter: 'drop-shadow(0 2px 4px rgba(0,0,0,0.3))'
+                  }}
+                />
+              </div>
+            </div>
+            
+            {/* Tab Navigation */}
+            <div style={{ display:'flex', gap:4, marginBottom:-1 }}>
+              {[
+                { id: 'objects', label: '📦 Objects', icon: '📦' },
+                { id: 'models', label: '🎨 Models', icon: '🎨' },
+                { id: 'transform', label: '🔧 Transform', icon: '🔧' },
+                { id: 'audio', label: '🔊 Audio', icon: '🔊' },
+                { id: 'settings', label: '⚙️ Settings', icon: '⚙️' }
+              ].map(tab => (
+                <button
+                  key={tab.id}
+                  onClick={() => setActiveEditorTab(tab.id)}
+                  style={{
+                    flex:1,
+                    padding:'12px 8px',
+                    borderRadius:'8px 8px 0 0',
+                    border:'none',
+                    borderBottom: activeEditorTab === tab.id ? '3px solid #3b82f6' : '3px solid transparent',
+                    background: activeEditorTab === tab.id ? 'rgba(59, 130, 246, 0.15)' : 'transparent',
+                    color: activeEditorTab === tab.id ? '#60a5fa' : '#94a3b8',
+                    cursor:'pointer',
+                    fontSize:20,
+                    fontWeight:600,
+                    transition:'all 0.2s',
+                    textAlign:'center'
+                  }}
+                  onMouseEnter={e => {
+                    if (activeEditorTab !== tab.id) {
+                      e.currentTarget.style.background = 'rgba(59, 130, 246, 0.08)';
+                      e.currentTarget.style.color = '#cbd5e1';
+                    }
+                  }}
+                  onMouseLeave={e => {
+                    if (activeEditorTab !== tab.id) {
+                      e.currentTarget.style.background = 'transparent';
+                      e.currentTarget.style.color = '#94a3b8';
+                    }
+                  }}
+                >
+                  {tab.icon}
+                </button>
+              ))}
+            </div>
           </div>
           
-          {/* Cube Placement System */}
-          <div style={{ marginTop:8, paddingTop:6, borderTop:'1px solid #10b981' }}>
-            <div style={{ fontWeight:600, color:'#10b981', marginBottom:4 }}>📦 Object Placer</div>
-            <label style={{ display:'flex', alignItems:'center', gap:6 }}>
-              <input type="checkbox" checked={cubeEditMode} onChange={e=>setCubeEditMode(e.target.checked)} /> Enable editing
+          {/* Scrollable Tab Content */}
+          <div style={{ 
+            flex:1,
+            overflowY:'auto',
+            overscrollBehavior:'contain',
+            padding:'16px 20px',
+            display:'flex',
+            flexDirection:'column',
+            gap:14,
+            direction: 'rtl' // Right-to-left to put scrollbar on left
+          }}>
+            <div style={{ direction: 'ltr' }}> {/* Reset direction for content */}
+            
+            {/* OBJECTS TAB */}
+            {activeEditorTab === 'objects' && (
+              <>
+                {/* Object Placer Section - ALWAYS AT TOP */}
+                <div 
+                  data-section-index="0"
+                  style={{ 
+                    background: selectedSectionIndex === 0
+                      ? (isInSection ? 'rgba(34, 197, 94, 0.15)' : 'rgba(59, 130, 246, 0.15)')
+                      : 'rgba(5, 150, 105, 0.08)', 
+                    padding:'10px', 
+                    borderRadius:8,
+                    border: selectedSectionIndex === 0
+                      ? (isInSection ? '2px solid #22c55e' : '2px solid #3b82f6')
+                      : '1px solid rgba(16, 185, 129, 0.2)',
+                    boxShadow: selectedSectionIndex === 0
+                      ? (isInSection ? '0 0 20px rgba(34, 197, 94, 0.5)' : '0 0 20px rgba(59, 130, 246, 0.4)')
+                      : 'none',
+                    transition: 'all 0.2s ease'
+                  }}
+                >
+            <div style={{ fontWeight:600, fontSize:11, color:'#6ee7b7', marginBottom:8, textTransform:'uppercase', letterSpacing:'0.5px' }}>📦 Object Placer</div>
+            <label 
+              style={{ 
+                display:'flex', 
+                alignItems:'center', 
+                gap:8, 
+                fontSize:11, 
+                cursor:'pointer', 
+                marginBottom:8,
+                padding: '6px 8px',
+                borderRadius: 6,
+                background: (selectedSectionIndex === 0 && isInSection && selectedItemIndex === 0) 
+                  ? 'rgba(34, 197, 94, 0.3)' 
+                  : 'transparent',
+                border: (selectedSectionIndex === 0 && isInSection && selectedItemIndex === 0)
+                  ? '2px solid #22c55e'
+                  : '2px solid transparent',
+                transition: 'all 0.2s ease'
+              }}
+            >
+              <input type="checkbox" checked={cubeEditMode} onChange={e=>setCubeEditMode(e.target.checked)} style={{ cursor:'pointer' }} /> 
+              <span style={{ fontWeight:500 }}>Enable editing</span>
             </label>
+            
+            {/* Terrain Sculpting Toggle */}
+            <label
+              style={{ 
+                display:'flex', 
+                alignItems:'center', 
+                gap:8, 
+                fontSize:11, 
+                cursor:'pointer', 
+                marginBottom:8,
+                padding: '6px 8px',
+                borderRadius: 6,
+                background: sculptMode ? 'rgba(59, 130, 246, 0.3)' : 'transparent',
+                border: sculptMode ? '2px solid #3b82f6' : '2px solid transparent',
+                transition: 'all 0.2s ease'
+              }}
+            >
+              <input type="checkbox" checked={sculptMode} onChange={e=>setSculptMode(e.target.checked)} style={{ cursor:'pointer' }} /> 
+              <span style={{ fontWeight:500 }}>🎨 Terrain Sculpting</span>
+            </label>
+            
+            {/* Sculpting Controls */}
+            {sculptMode && (
+              <div style={{ marginBottom:12, padding:'10px', borderRadius:8, background:'rgba(59, 130, 246, 0.1)', border:'1px solid rgba(59, 130, 246, 0.3)' }}>
+                <div style={{ marginBottom:8 }}>
+                  <div style={{ fontSize:10, color:'#94a3b8', marginBottom:4, fontWeight:600 }}>BRUSH SIZE: {sculptBrushSize.toFixed(1)}</div>
+                  <input 
+                    type="range" 
+                    min="1" 
+                    max="20" 
+                    step="0.5" 
+                    value={sculptBrushSize} 
+                    onChange={e=>setSculptBrushSize(parseFloat(e.target.value))}
+                    style={{ width:'100%', cursor:'pointer' }}
+                  />
+                </div>
+                <div>
+                  <div style={{ fontSize:10, color:'#94a3b8', marginBottom:4, fontWeight:600 }}>STRENGTH: {sculptStrength.toFixed(2)}</div>
+                  <input 
+                    type="range" 
+                    min="0.1" 
+                    max="2" 
+                    step="0.1" 
+                    value={sculptStrength} 
+                    onChange={e=>setSculptStrength(parseFloat(e.target.value))}
+                    style={{ width:'100%', cursor:'pointer' }}
+                  />
+                </div>
+                <div style={{ fontSize:10, color:'#94a3b8', marginTop:8, fontStyle:'italic' }}>
+                  Hover over terrain • ] Raise • [ Lower
+                </div>
+                <div style={{ 
+                  marginTop:10, 
+                  paddingTop:10, 
+                  borderTop:'1px solid rgba(148, 163, 184, 0.2)',
+                  display:'flex',
+                  justifyContent:'space-between',
+                  alignItems:'center'
+                }}>
+                  <div style={{ fontSize:10, color:'#94a3b8', fontWeight:600 }}>
+                    UNDO AVAILABLE: {sculptHistory.length}
+                  </div>
+                  <button
+                    onClick={undoSculpt}
+                    disabled={sculptHistory.length === 0}
+                    style={{
+                      padding:'4px 10px',
+                      borderRadius:4,
+                      border:'1px solid rgba(59, 130, 246, 0.5)',
+                      background: sculptHistory.length > 0 ? 'rgba(59, 130, 246, 0.3)' : 'rgba(100, 100, 100, 0.2)',
+                      color: sculptHistory.length > 0 ? '#ffffff' : '#64748b',
+                      fontSize:10,
+                      fontWeight:600,
+                      cursor: sculptHistory.length > 0 ? 'pointer' : 'not-allowed',
+                      transition:'all 0.2s'
+                    }}
+                  >
+                    ↶ UNDO (Ctrl+Z)
+                  </button>
+                </div>
+                <button
+                  onClick={clearAllSculpts}
+                  disabled={!selectedCubeId || !placedCubes.find(c => c.id === selectedCubeId && c.isTerrain && c.heightModifications && c.heightModifications.length > 0)}
+                  style={{
+                    marginTop:8,
+                    width:'100%',
+                    padding:'6px 10px',
+                    borderRadius:4,
+                    border:'1px solid rgba(239, 68, 68, 0.5)',
+                    background: selectedCubeId && placedCubes.find(c => c.id === selectedCubeId && c.isTerrain && c.heightModifications && c.heightModifications.length > 0) 
+                      ? 'rgba(239, 68, 68, 0.3)' 
+                      : 'rgba(100, 100, 100, 0.2)',
+                    color: selectedCubeId && placedCubes.find(c => c.id === selectedCubeId && c.isTerrain && c.heightModifications && c.heightModifications.length > 0)
+                      ? '#ffffff' 
+                      : '#64748b',
+                    fontSize:10,
+                    fontWeight:600,
+                    cursor: selectedCubeId && placedCubes.find(c => c.id === selectedCubeId && c.isTerrain && c.heightModifications && c.heightModifications.length > 0)
+                      ? 'pointer' 
+                      : 'not-allowed',
+                    transition:'all 0.2s'
+                  }}
+                >
+                  🗑️ CLEAR ALL SCULPTS ON SELECTED
+                </button>
+              </div>
+            )}
             
             {cubeEditMode && (
               <>
-                <div style={{ marginTop:6, fontWeight:600, fontSize:11, color:'#94a3b8' }}>Collision Shapes:</div>
-                <div style={{ display:'flex', gap:6, marginTop:4, flexWrap:'wrap' }}>
-                  <button 
-                    onClick={() => addCube('box', 'none')}
-                    style={{ 
-                      padding:'4px 8px', 
-                      borderRadius:6, 
-                      border:'1px solid #10b981', 
-                      background:'#064e3b', 
-                      color:'#ffffff !important', 
-                      cursor:'pointer',
-                      fontSize: 11,
-                      flex: '1 1 30%',
-                      fontWeight: 500
-                    }}
-                  >
-                    + Cube
-                  </button>
-                  <button 
-                    onClick={() => addCube('sphere', 'none')}
-                    style={{ 
-                      padding:'4px 8px', 
-                      borderRadius:6, 
-                      border:'1px solid #10b981', 
-                      background:'#064e3b', 
-                      color:'#ffffff !important', 
-                      cursor:'pointer',
-                      fontSize: 11,
-                      flex: '1 1 30%',
-                      fontWeight: 500
-                    }}
-                  >
-                    + Sphere
-                  </button>
-                  <button 
-                    onClick={() => addCube('cylinder', 'none')}
-                    style={{ 
-                      padding:'4px 8px', 
-                      borderRadius:6, 
-                      border:'1px solid #10b981', 
-                      background:'#064e3b', 
-                      color:'#ffffff !important', 
-                      cursor:'pointer',
-                      fontSize: 11,
-                      flex: '1 1 30%',
-                      fontWeight: 500
-                    }}
-                  >
-                    + Cylinder
-                  </button>
+                {/* Collision Shapes */}
+                <div style={{ marginBottom:10 }}>
+                  <div style={{ fontSize:10, color:'#94a3b8', marginBottom:6, fontWeight:600 }}>COLLISION SHAPES</div>
+                  <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr 1fr', gap:4 }}>
+                    <button 
+                      onClick={() => addCube('box', 'none')}
+                      style={{ 
+                        padding:'8px 6px', 
+                        borderRadius:6, 
+                        border: (selectedSectionIndex === 0 && isInSection && selectedItemIndex === 1)
+                          ? '2px solid #22c55e'
+                          : '1px solid rgba(16, 185, 129, 0.3)',
+                        background: (selectedSectionIndex === 0 && isInSection && selectedItemIndex === 1)
+                          ? 'rgba(34, 197, 94, 0.3)'
+                          : 'rgba(6, 78, 59, 0.5)',
+                        color:'#ffffff', 
+                        cursor:'pointer',
+                        fontSize: 10,
+                        fontWeight: 600,
+                        transition:'all 0.2s',
+                        boxShadow: (selectedSectionIndex === 0 && isInSection && selectedItemIndex === 1)
+                          ? '0 0 10px rgba(34, 197, 94, 0.5)'
+                          : 'none'
+                      }}
+                      onMouseEnter={e => {
+                        if (!(selectedSectionIndex === 0 && isInSection && selectedItemIndex === 1)) {
+                          e.currentTarget.style.background = 'rgba(6, 78, 59, 0.8)';
+                        }
+                      }}
+                      onMouseLeave={e => {
+                        if (!(selectedSectionIndex === 0 && isInSection && selectedItemIndex === 1)) {
+                          e.currentTarget.style.background = 'rgba(6, 78, 59, 0.5)';
+                        }
+                      }}
+                    >
+                      📦 Cube
+                    </button>
+                    <button 
+                      onClick={() => addCube('sphere', 'none')}
+                      style={{ 
+                        padding:'8px 6px', 
+                        borderRadius:6, 
+                        border: (selectedSectionIndex === 0 && isInSection && selectedItemIndex === 2)
+                          ? '2px solid #22c55e'
+                          : '1px solid rgba(16, 185, 129, 0.3)',
+                        background: (selectedSectionIndex === 0 && isInSection && selectedItemIndex === 2)
+                          ? 'rgba(34, 197, 94, 0.3)'
+                          : 'rgba(6, 78, 59, 0.5)',
+                        color:'#ffffff', 
+                        cursor:'pointer',
+                        fontSize: 10,
+                        fontWeight: 600,
+                        transition:'all 0.2s',
+                        boxShadow: (selectedSectionIndex === 0 && isInSection && selectedItemIndex === 2)
+                          ? '0 0 10px rgba(34, 197, 94, 0.5)'
+                          : 'none'
+                      }}
+                      onMouseEnter={e => {
+                        if (!(selectedSectionIndex === 0 && isInSection && selectedItemIndex === 2)) {
+                          e.currentTarget.style.background = 'rgba(6, 78, 59, 0.8)';
+                        }
+                      }}
+                      onMouseLeave={e => {
+                        if (!(selectedSectionIndex === 0 && isInSection && selectedItemIndex === 2)) {
+                          e.currentTarget.style.background = 'rgba(6, 78, 59, 0.5)';
+                        }
+                      }}
+                    >
+                      🔮 Sphere
+                    </button>
+                    <button 
+                      onClick={() => addCube('cylinder', 'none')}
+                      style={{ 
+                        padding:'8px 6px', 
+                        borderRadius:6, 
+                        border: (selectedSectionIndex === 0 && isInSection && selectedItemIndex === 3)
+                          ? '2px solid #22c55e'
+                          : '1px solid rgba(16, 185, 129, 0.3)',
+                        background: (selectedSectionIndex === 0 && isInSection && selectedItemIndex === 3)
+                          ? 'rgba(34, 197, 94, 0.3)'
+                          : 'rgba(6, 78, 59, 0.5)',
+                        color:'#ffffff', 
+                        cursor:'pointer',
+                        fontSize: 10,
+                        fontWeight: 600,
+                        transition:'all 0.2s',
+                        boxShadow: (selectedSectionIndex === 0 && isInSection && selectedItemIndex === 3)
+                          ? '0 0 10px rgba(34, 197, 94, 0.5)'
+                          : 'none'
+                      }}
+                      onMouseEnter={e => {
+                        if (!(selectedSectionIndex === 0 && isInSection && selectedItemIndex === 3)) {
+                          e.currentTarget.style.background = 'rgba(6, 78, 59, 0.8)';
+                        }
+                      }}
+                      onMouseLeave={e => {
+                        if (!(selectedSectionIndex === 0 && isInSection && selectedItemIndex === 3)) {
+                          e.currentTarget.style.background = 'rgba(6, 78, 59, 0.5)';
+                        }
+                      }}
+                    >
+                      🛢️ Cylinder
+                    </button>
+                  </div>
+                  
+                  {/* AI Box Button - Separate row for emphasis */}
+                  <div style={{ marginTop:8 }}>
+                    <button 
+                      onClick={() => {
+                        const avatar = window.__CF_LOCAL_AVATAR__ || {};
+                        const playerX = avatar.x || 0;
+                        const playerZ = avatar.z || 0;
+                        const playerY = (typeof avatar.lift === 'number' ? avatar.lift : 0);
+                        const playerYaw = avatar.yaw || 0;
+                        const spawnDistance = 15;
+                        const spawnX = playerX + Math.sin(playerYaw) * spawnDistance;
+                        const spawnZ = playerZ + Math.cos(playerYaw) * spawnDistance;
+                        
+                        const newAIBox = {
+                          id: Date.now() + Math.random(),
+                          shape: 'box',
+                          isAIBox: true,
+                          aiBoxLabel: `AI Box #${Math.floor(Math.random() * 9999)}`,
+                          position: { x: spawnX, y: playerY, z: spawnZ },
+                          rotation: { x: 0, y: 0, z: 0 },
+                          scale: { x: 10, y: 10, z: 10 },
+                          hasCollision: false,
+                          walkableTop: false,
+                          color: '#22d3ee',
+                          opacity: 0.15,
+                          wireframe: true,
+                          aiContent: null
+                        };
+                        setPlacedCubes(prevCubes => [...prevCubes, newAIBox]);
+                        setSelectedCubeId(newAIBox.id);
+                        console.log(`🤖 Created AI Box with ID: ${newAIBox.id}, Label: ${newAIBox.aiBoxLabel}`);
+                      }}
+                      style={{ 
+                        width: '100%',
+                        padding:'10px 8px', 
+                        borderRadius:6, 
+                        border: '2px solid rgba(34, 211, 238, 0.5)',
+                        background: 'rgba(6, 182, 212, 0.2)',
+                        color:'#22d3ee', 
+                        cursor:'pointer',
+                        fontSize: 11,
+                        fontWeight: 700,
+                        transition:'all 0.2s',
+                        boxShadow: '0 0 15px rgba(34, 211, 238, 0.3)'
+                      }}
+                      onMouseEnter={e => {
+                        e.currentTarget.style.background = 'rgba(6, 182, 212, 0.4)';
+                        e.currentTarget.style.boxShadow = '0 0 20px rgba(34, 211, 238, 0.5)';
+                      }}
+                      onMouseLeave={e => {
+                        e.currentTarget.style.background = 'rgba(6, 182, 212, 0.2)';
+                        e.currentTarget.style.boxShadow = '0 0 15px rgba(34, 211, 238, 0.3)';
+                      }}
+                    >
+                      🤖 AI Box (Copilot)
+                    </button>
+                  </div>
                 </div>
-                
-                <div style={{ marginTop:6, fontWeight:600, fontSize:11, color:'#94a3b8' }}>3D Models:</div>
-                <div style={{ display:'flex', gap:6, marginTop:4, flexWrap:'wrap' }}>
-                  <button 
-                    onClick={() => addCube('box', 'asteroid')}
-                    style={{ 
-                      padding:'4px 8px', 
-                      borderRadius:6, 
-                      border:'1px solid #a855f7', 
-                      background:'#581c87', 
-                      color:'#ffffff !important', 
-                      cursor:'pointer',
-                      fontSize: 11,
-                      flex: 1,
-                      minWidth: '45%',
-                      fontWeight: 500
-                    }}
-                  >
-                    🪨 Asteroid
-                  </button>
-                  <button 
-                    onClick={() => addCube('box', 'table')}
-                    style={{ 
-                      padding:'4px 8px', 
-                      borderRadius:6, 
-                      border:'1px solid #a855f7', 
-                      background:'#581c87', 
-                      color:'#ffffff !important', 
-                      cursor:'pointer',
-                      fontSize: 11,
-                      flex: 1,
-                      minWidth: '45%',
-                      fontWeight: 500
-                    }}
-                  >
-                    🪑 Table
-                  </button>
-                  <button 
-                    onClick={() => addCube('box', 'stairs2')}
-                    style={{ 
-                      padding:'4px 8px', 
-                      borderRadius:6, 
-                      border:'1px solid #10b981', 
-                      background:'#065f46', 
-                      color:'#ffffff !important', 
-                      cursor:'pointer',
-                      fontSize: 11,
-                      flex: 1,
-                      minWidth: '45%',
-                      fontWeight: 500
-                    }}
-                  >
-                    🪜 Stairs2
-                  </button>
-                </div>
-                
-                {/* List of placed cubes */}
-                <div style={{ marginTop:8, maxHeight:200, overflowY:'auto', border:'1px solid #334155', borderRadius:6, padding:4 }}>
-                  {placedCubes.length === 0 ? (
-                    <div style={{ padding:8, color:'#64748b', fontSize:11, textAlign:'center' }}>No objects placed</div>
-                  ) : (
-                    placedCubes.map((cube, idx) => (
-                      <div 
-                        key={cube.id}
-                        onClick={() => setSelectedCubeId(cube.id)}
-                        style={{
-                          padding:'6px 8px',
-                          marginBottom:4,
-                          borderRadius:6,
-                          border: selectedCubeId === cube.id ? '2px solid #10b981' : '1px solid #334155',
-                          background: selectedCubeId === cube.id ? '#064e3b' : '#0f172a',
-                          cursor:'pointer',
-                          fontSize:11
-                        }}
-                      >
-                        <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center' }}>
-                          <span>
-                            {cube.modelType === 'asteroid' ? '🪨 Asteroid' : 
-                             cube.modelType === 'table' ? '🪑 Table' :
-                             cube.modelType === 'stairs2' ? '🪜 Stairs2' :
-                             cube.shape === 'sphere' ? '🔮 Sphere' :
-                             cube.shape === 'cylinder' ? '🛢️ Cylinder' : '📦 Cube'} #{idx + 1}
-                          </span>
-                          <div style={{ display:'flex', gap:4 }}>
-                            <button
-                              onClick={(e) => { e.stopPropagation(); duplicateCube(cube.id); }}
-                              style={{ padding:'2px 6px', borderRadius:4, border:'1px solid #334155', background:'#1e293b', color:'#e2e8f0', fontSize:10 }}
-                              title="Duplicate"
+
+                {/* Placed Objects List */}
+                <div>
+                  <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:6 }}>
+                    <div style={{ fontSize:10, color:'#94a3b8', fontWeight:600 }}>PLACED OBJECTS ({placedCubes.filter(c => !c.isTerrain).length})</div>
+                    <button
+                      onClick={cleanupOrphanedCollisions}
+                      style={{
+                        padding:'3px 6px',
+                        background:'rgba(239, 68, 68, 0.2)',
+                        border:'1px solid rgba(239, 68, 68, 0.4)',
+                        borderRadius:4,
+                        color:'#fca5a5',
+                        cursor:'pointer',
+                        fontSize:8,
+                        fontWeight:600,
+                        transition:'all 0.2s'
+                      }}
+                      onMouseEnter={e => e.currentTarget.style.background = 'rgba(239, 68, 68, 0.3)'}
+                      onMouseLeave={e => e.currentTarget.style.background = 'rgba(239, 68, 68, 0.2)'}
+                      title="Remove orphaned collision objects whose parents were deleted"
+                    >
+                      🧹 Cleanup
+                    </button>
+                  </div>
+                  <div style={{ maxHeight:180, overflowY:'auto', border:'1px solid rgba(148, 163, 184, 0.1)', borderRadius:6, padding:4, background:'rgba(15, 23, 42, 0.3)' }}>
+                    {placedCubes.filter(c => !c.isTerrain).length === 0 ? (
+                      <div style={{ padding:12, color:'#64748b', fontSize:10, textAlign:'center' }}>No objects placed</div>
+                    ) : (
+                      placedCubes.filter(cube => !cube.parentId && !cube.isTerrain).map((cube, idx) => {
+                        const childCollision = placedCubes.find(c => c.parentId === cube.id);
+                        const itemIndex = 4 + idx; // Items 4+ are placed objects
+                        const isSelected = selectedSectionIndex === 0 && isInSection && selectedItemIndex === itemIndex;
+                        const isInThisSubMenu = isInSubMenu && isSelected; // Are we navigating inside THIS object's sub-menu?
+                        
+                        return (
+                          <div key={cube.id} style={{ marginBottom:4 }} data-placed-object-index={itemIndex}>
+                            <div 
+                              onClick={() => setSelectedCubeId(cube.id)}
+                              style={{
+                                padding:'8px',
+                                borderRadius:6,
+                                border: isSelected 
+                                  ? '2px solid #22c55e'
+                                  : selectedCubeId === cube.id ? '2px solid #10b981' : '1px solid rgba(148, 163, 184, 0.15)',
+                                background: isSelected
+                                  ? 'rgba(34, 197, 94, 0.3)'
+                                  : selectedCubeId === cube.id ? 'rgba(6, 78, 59, 0.4)' : 'rgba(15, 23, 42, 0.4)',
+                                boxShadow: isSelected ? '0 0 10px rgba(34, 197, 94, 0.5)' : 'none',
+                                cursor:'pointer',
+                                fontSize:10,
+                                transition:'all 0.2s'
+                              }}
                             >
-                              📋
-                            </button>
-                            <button
-                              onClick={(e) => { e.stopPropagation(); deleteCube(cube.id); }}
-                              style={{ padding:'2px 6px', borderRadius:4, border:'1px solid #dc2626', background:'#7f1d1d', color:'#fecaca', fontSize:10 }}
-                              title="Delete"
-                            >
-                              🗑️
-                            </button>
+                          <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:4 }}>
+                            <span style={{ fontWeight:600, color: cube.isAIBox ? '#22d3ee' : '#e2e8f0' }}>
+                              {cube.isAIBox ? `🤖 ${cube.aiBoxLabel || 'AI Box'}` :
+                               cube.modelType === 'custom' ? `📦 ${cube.customModelName || 'Custom Model'}` :
+                               cube.modelType === 'asteroid' ? '🪨 Asteroid' : 
+                               cube.modelType === 'table' ? '🪑 Table' :
+                               cube.modelType === 'rover' ? '🚗 Rover' :
+                               cube.modelType === 'stairs2' ? '🪜 Stairs2' :
+                               cube.shape === 'sphere' ? '🔮 Sphere' :
+                               cube.shape === 'cylinder' ? '🛢️ Cylinder' : '📦 Cube'} #{idx + 1}
+                            </span>
+                            <div style={{ display:'flex', gap:4 }}>
+                              <button
+                                onClick={(e) => { e.stopPropagation(); duplicateCube(cube.id); }}
+                                style={{ 
+                                  padding:'2px 6px', 
+                                  borderRadius:4, 
+                                  border: (isInThisSubMenu && selectedSubItemIndex === 0) ? '2px solid #22c55e' : '1px solid rgba(148, 163, 184, 0.2)', 
+                                  background: (isInThisSubMenu && selectedSubItemIndex === 0) ? 'rgba(34, 197, 94, 0.4)' : 'rgba(30, 41, 59, 0.6)', 
+                                  color:'#cbd5e1', 
+                                  fontSize:9,
+                                  boxShadow: (isInThisSubMenu && selectedSubItemIndex === 0) ? '0 0 8px rgba(34, 197, 94, 0.5)' : 'none',
+                                  transition:'all 0.2s'
+                                }}
+                                title="Duplicate"
+                              >
+                                📋
+                              </button>
+                              <button
+                                onClick={(e) => { e.stopPropagation(); deleteCube(cube.id); }}
+                                style={{ 
+                                  padding:'2px 6px', 
+                                  borderRadius:4, 
+                                  border: (isInThisSubMenu && selectedSubItemIndex === 1) ? '2px solid #22c55e' : '1px solid rgba(220, 38, 38, 0.3)', 
+                                  background: (isInThisSubMenu && selectedSubItemIndex === 1) ? 'rgba(34, 197, 94, 0.4)' : 'rgba(127, 29, 29, 0.6)', 
+                                  color:'#fecaca', 
+                                  fontSize:9,
+                                  boxShadow: (isInThisSubMenu && selectedSubItemIndex === 1) ? '0 0 8px rgba(34, 197, 94, 0.5)' : 'none',
+                                  transition:'all 0.2s'
+                                }}
+                                title="Delete"
+                              >
+                                🗑️
+                              </button>
+                            </div>
                           </div>
+                          <div style={{ fontSize:9, color:'#94a3b8', marginBottom:4 }}>
+                            {cube.modelType && cube.modelType !== 'none' ? `Model: ${cube.modelType}` : 
+                             cube.shape === 'sphere' ? 'Spherical' :
+                             cube.shape === 'cylinder' ? 'Cylindrical' : 'Box'} • Pos: ({cube.position.x.toFixed(1)}, {cube.position.y.toFixed(1)}, {cube.position.z.toFixed(1)})
+                          </div>
+                          <div style={{ display:'flex', gap:8 }}>
+                            <label 
+                              style={{ 
+                                display:'flex', 
+                                alignItems:'center', 
+                                gap:4, 
+                                fontSize:9,
+                                padding:'2px 4px',
+                                borderRadius:3,
+                                border: (isInThisSubMenu && selectedSubItemIndex === 2) ? '2px solid #22c55e' : 'none',
+                                background: (isInThisSubMenu && selectedSubItemIndex === 2) ? 'rgba(34, 197, 94, 0.3)' : 'transparent',
+                                boxShadow: (isInThisSubMenu && selectedSubItemIndex === 2) ? '0 0 8px rgba(34, 197, 94, 0.5)' : 'none',
+                                transition:'all 0.2s'
+                              }} 
+                              onClick={(e) => e.stopPropagation()}>
+                              <input 
+                                type="checkbox" 
+                                checked={cube.hasCollision} 
+                                onChange={(e) => { e.stopPropagation(); updateCubeAndSync(cube.id, { hasCollision: e.target.checked }); }} 
+                                style={{ cursor:'pointer' }}
+                              /> 
+                              Collision
+                            </label>
+                            <label 
+                              style={{ 
+                                display:'flex', 
+                                alignItems:'center', 
+                                gap:4, 
+                                fontSize:9, 
+                                opacity:!cube.hasCollision?0.5:1,
+                                padding:'2px 4px',
+                                borderRadius:3,
+                                border: (isInThisSubMenu && selectedSubItemIndex === 3) ? '2px solid #22c55e' : 'none',
+                                background: (isInThisSubMenu && selectedSubItemIndex === 3) ? 'rgba(34, 197, 94, 0.3)' : 'transparent',
+                                boxShadow: (isInThisSubMenu && selectedSubItemIndex === 3) ? '0 0 8px rgba(34, 197, 94, 0.5)' : 'none',
+                                transition:'all 0.2s'
+                              }} 
+                              onClick={(e) => e.stopPropagation()}>
+                              <input 
+                                type="checkbox" 
+                                checked={cube.walkableTop || false} 
+                                onChange={(e) => { e.stopPropagation(); updateCubeAndSync(cube.id, { walkableTop: e.target.checked }); }} 
+                                disabled={!cube.hasCollision}
+                                style={{ cursor:'pointer' }}
+                              /> 
+                              Walkable
+                            </label>
+                          </div>
+                          
+                          {/* Collision Layer - for custom models */}
+                          {cube.modelType === 'custom' && (() => {
+                            // Find existing collision layer for this model
+                            const existingCollision = placedCubes.find(c => c.parentId === cube.id);
+                            
+                            // Debug: log collision properties
+                            if (existingCollision) {
+                              console.log('[Collision Debug]', {
+                                parentId: cube.id,
+                                shape: existingCollision.shape,
+                                hasCollision: existingCollision.hasCollision,
+                                walkableTop: existingCollision.walkableTop
+                              });
+                            }
+                            
+                            return (
+                              <div style={{ marginTop:6, padding:4, background:'rgba(147, 51, 234, 0.08)', borderRadius:4, borderLeft:'2px solid rgba(147, 51, 234, 0.4)' }} onClick={(e) => e.stopPropagation()}>
+                                <div style={{ fontSize:8, color:'#c084fc', fontWeight:600, marginBottom:3 }}>
+                                  {existingCollision ? '🛡️ Collision' : '➕ Add Collision'}
+                                </div>
+                                
+                                {/* Shape Toggle Buttons */}
+                                <div style={{ display:'flex', gap:2, marginBottom: existingCollision ? 3 : 0 }}>
+                                  {[
+                                    { shape: 'box', icon: '📦', subIndex: 4 },
+                                    { shape: 'sphere', icon: '⚽', subIndex: 5 },
+                                    { shape: 'cylinder', icon: '🥫', subIndex: 6 }
+                                  ].map(({ shape, icon, subIndex }) => {
+                                    const isSubItemSelected = isInThisSubMenu && selectedSubItemIndex === subIndex;
+                                    return (
+                                      <button
+                                        key={shape}
+                                        onClick={(e) => { 
+                                          e.stopPropagation(); 
+                                          
+                                          // Use actual model bounds if available, otherwise estimate
+                                          const bounds = cube.modelBounds || { width: 100, height: 100, depth: 100 };
+                                          const scaleX = cube.scale.x || 0.1;
+                                          const scaleY = cube.scale.y || 0.1;
+                                          const scaleZ = cube.scale.z || 0.1;
+                                          
+                                          // Actual world size = modelBounds * scale
+                                          const worldWidth = bounds.width * scaleX;
+                                          const worldHeight = bounds.height * scaleY;
+                                          const worldDepth = bounds.depth * scaleZ;
+                                          
+                                          if (existingCollision) {
+                                            // Update existing collision to new shape
+                                            updateCubeAndSync(existingCollision.id, { 
+                                              shape,
+                                              scale: { 
+                                                x: worldWidth, 
+                                                y: worldHeight, 
+                                                z: worldDepth 
+                                              }
+                                            });
+                                            // Keep parent selected, don't switch to collision
+                                          } else {
+                                            // Create new collision layer
+                                            const newId = `collision-${cube.id}-${Date.now()}`;
+                                            const newCube = {
+                                              id: newId,
+                                              shape,
+                                              modelType: 'none',
+                                              position: { ...cube.position },
+                                              rotation: { x: 0, y: 0, z: 0 },
+                                              scale: { 
+                                                x: worldWidth, 
+                                                y: worldHeight, 
+                                                z: worldDepth 
+                                              },
+                                              color: '#a855f7',
+                                              hasCollision: true,
+                                              walkableTop: false,
+                                              parentId: cube.id,
+                                              followParentScale: true
+                                            };
+                                            
+                                            const newCubes = [...placedCubes, newCube];
+                                            setPlacedCubes(newCubes);
+                                            // Keep parent selected, don't switch to collision
+                                            sendCubeUpdate(newCubes);
+                                          }
+                                        }}
+                                      style={{
+                                        flex:1,
+                                        padding:'4px 2px',
+                                        borderRadius:3,
+                                        border: isSubItemSelected ? '2px solid #22c55e' : existingCollision?.shape === shape ? '1px solid #a855f7' : '1px solid rgba(147, 51, 234, 0.3)',
+                                        background: isSubItemSelected ? 'rgba(34, 197, 94, 0.4)' : existingCollision?.shape === shape ? 'rgba(147, 51, 234, 0.4)' : 'rgba(147, 51, 234, 0.15)',
+                                        color: '#e9d5ff',
+                                        fontSize:8,
+                                        fontWeight:600,
+                                        cursor:'pointer',
+                                        transition:'all 0.2s',
+                                        boxShadow: isSubItemSelected ? '0 0 8px rgba(34, 197, 94, 0.5)' : 'none'
+                                      }}
+                                      onMouseEnter={e => {
+                                        if (!isSubItemSelected) {
+                                          e.currentTarget.style.background = 'rgba(147, 51, 234, 0.5)';
+                                        }
+                                      }}
+                                      onMouseLeave={e => {
+                                        if (!isSubItemSelected) {
+                                          e.currentTarget.style.background = existingCollision?.shape === shape ? 'rgba(147, 51, 234, 0.4)' : 'rgba(147, 51, 234, 0.15)';
+                                        }
+                                      }}
+                                    >
+                                      {icon}
+                                    </button>
+                                  );
+                                })}
+                                {existingCollision && (
+                                  <button
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      deleteCube(existingCollision.id);
+                                    }}
+                                    style={{
+                                      flex:0.5,
+                                      padding:'4px 2px',
+                                      borderRadius:3,
+                                      border: '1px solid rgba(220, 38, 38, 0.3)',
+                                      background: 'rgba(127, 29, 29, 0.5)',
+                                      color: '#fca5a5',
+                                      fontSize:8,
+                                      cursor:'pointer',
+                                      transition:'all 0.2s'
+                                    }}
+                                    onMouseEnter={e => e.currentTarget.style.background = 'rgba(127, 29, 29, 0.7)'}
+                                    onMouseLeave={e => e.currentTarget.style.background = 'rgba(127, 29, 29, 0.5)'}
+                                    title="Remove Collision"
+                                  >
+                                    🗑️
+                                  </button>
+                                )}
+                              </div>
+                              
+                              {existingCollision && (
+                                <div 
+                                  onClick={(e) => { e.stopPropagation(); setSelectedCubeId(existingCollision.id); }}
+                                  style={{
+                                    marginTop:2,
+                                    marginLeft:8,
+                                    padding:'4px 6px',
+                                    borderRadius:4,
+                                    border: selectedCubeId === existingCollision.id ? '1px solid #a855f7' : '1px solid rgba(147, 51, 234, 0.2)',
+                                    background: selectedCubeId === existingCollision.id ? 'rgba(147, 51, 234, 0.2)' : 'rgba(147, 51, 234, 0.08)',
+                                    cursor:'pointer',
+                                    fontSize:8,
+                                    color:'#c084fc',
+                                    transition:'all 0.2s'
+                                  }}
+                                >
+                                  ↳ {existingCollision.shape === 'box' ? '📦 Box' : existingCollision.shape === 'sphere' ? '⚽ Sphere' : '🥫 Cylinder'} Collision
+                                  <label style={{ display:'inline', marginLeft:6 }} onClick={(e) => e.stopPropagation()}>
+                                    <input 
+                                      type="checkbox" 
+                                      checked={existingCollision.walkableTop || false} 
+                                      onChange={(e) => { e.stopPropagation(); updateCubeAndSync(existingCollision.id, { walkableTop: e.target.checked }); }} 
+                                      style={{ cursor:'pointer' }}
+                                    /> 
+                                    <span style={{ fontSize:7 }}>Walkable</span>
+                                  </label>
+                                </div>
+                              )}
+                            </div>
+                          );
+                          })()}
                         </div>
-                        <div style={{ marginTop:4, fontSize:10, color:'#94a3b8' }}>
-                          {cube.modelType && cube.modelType !== 'none' ? `Model: ${cube.modelType}` : 
-                           cube.shape === 'sphere' ? 'Spherical' :
-                           cube.shape === 'cylinder' ? 'Cylindrical' : 'Box'} | Pos: ({cube.position.x.toFixed(1)}, {cube.position.y.toFixed(1)}, {cube.position.z.toFixed(1)})
+                      </div>
+                    );
+                  })
+                    )}
+                  </div>
+                </div>
+              </>
+            )}
+          </div>
+          
+                {/* Collision Shapes Section */}
+                <div 
+                  data-section-index="1"
+                  style={{ 
+                    background: selectedSectionIndex === 1
+                      ? (isInSection ? 'rgba(34, 197, 94, 0.15)' : 'rgba(59, 130, 246, 0.15)')
+                      : 'rgba(239, 68, 68, 0.08)', 
+                    padding:'14px', 
+                    borderRadius:10,
+                    border: selectedSectionIndex === 1
+                      ? (isInSection ? '2px solid #22c55e' : '2px solid #3b82f6')
+                      : '1px solid rgba(239, 68, 68, 0.2)',
+                    boxShadow: selectedSectionIndex === 1
+                      ? (isInSection ? '0 0 20px rgba(34, 197, 94, 0.5)' : '0 0 20px rgba(59, 130, 246, 0.4)')
+                      : 'none',
+                    transition: 'all 0.2s ease'
+                  }}
+                >
+                  <div style={{ fontWeight:600, fontSize:12, color:'#fca5a5', marginBottom:10 }}>🛡️ Collision Shapes</div>
+                  <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:6 }}>
+                    <button
+                      onClick={() => {
+                        const avatar = window.__CF_LOCAL_AVATAR__ || {};
+                        const playerX = avatar.x || 0;
+                        const playerZ = avatar.z || 0;
+                        const playerY = (typeof avatar.lift === 'number' ? avatar.lift : 0);
+                        const playerYaw = avatar.yaw || 0;
+                        const spawnDistance = 15;
+                        const spawnX = playerX + Math.sin(playerYaw) * spawnDistance;
+                        const spawnZ = playerZ + Math.cos(playerYaw) * spawnDistance;
+                        const newCollision = {
+                          id: Date.now() + Math.random(),
+                          shape: 'box',
+                          position: { x: spawnX, y: playerY, z: spawnZ },
+                          rotation: { x: 0, y: 0, z: 0 },
+                          scale: { x: 10, y: 10, z: 10 },
+                          hasCollision: true,
+                          walkableTop: false,
+                          color: '#ef4444',
+                          opacity: 0.3
+                        };
+                        const newCubes = [...placedCubes, newCollision];
+                        setPlacedCubes(newCubes);
+                        setSelectedCubeId(newCollision.id);
+                        sendCubeUpdate(newCubes);
+                      }}
+                      style={{
+                        padding:'10px',
+                        borderRadius:8,
+                        border: (selectedSectionIndex === 1 && isInSection && selectedItemIndex === 0)
+                          ? '2px solid #3b82f6'
+                          : '1px solid rgba(239, 68, 68, 0.3)',
+                        background: (selectedSectionIndex === 1 && isInSection && selectedItemIndex === 0)
+                          ? 'rgba(59, 130, 246, 0.3)'
+                          : 'rgba(127, 29, 29, 0.5)',
+                        color:'#ffffff',
+                        cursor:'pointer',
+                        fontSize:10,
+                        fontWeight:600,
+                        transition:'all 0.2s',
+                        boxShadow: (selectedSectionIndex === 1 && isInSection && selectedItemIndex === 0)
+                          ? '0 0 15px rgba(59, 130, 246, 0.5)'
+                          : 'none'
+                      }}
+                      onMouseEnter={e => {
+                        if (!(selectedSectionIndex === 1 && isInSection && selectedItemIndex === 0)) {
+                          e.currentTarget.style.background = 'rgba(127, 29, 29, 0.7)';
+                        }
+                      }}
+                      onMouseLeave={e => {
+                        if (!(selectedSectionIndex === 1 && isInSection && selectedItemIndex === 0)) {
+                          e.currentTarget.style.background = 'rgba(127, 29, 29, 0.5)';
+                        }
+                      }}
+                    >
+                      📦 Box
+                    </button>
+                    <button
+                      onClick={() => {
+                        const avatar = window.__CF_LOCAL_AVATAR__ || {};
+                        const playerX = avatar.x || 0;
+                        const playerZ = avatar.z || 0;
+                        const playerY = (typeof avatar.lift === 'number' ? avatar.lift : 0);
+                        const playerYaw = avatar.yaw || 0;
+                        const spawnDistance = 15;
+                        const spawnX = playerX + Math.sin(playerYaw) * spawnDistance;
+                        const spawnZ = playerZ + Math.cos(playerYaw) * spawnDistance;
+                        const newCollision = {
+                          id: Date.now() + Math.random(),
+                          shape: 'sphere',
+                          position: { x: spawnX, y: playerY, z: spawnZ },
+                          rotation: { x: 0, y: 0, z: 0 },
+                          scale: { x: 10, y: 10, z: 10 },
+                          hasCollision: true,
+                          walkableTop: false,
+                          color: '#f59e0b',
+                          opacity: 0.3
+                        };
+                        const newCubes = [...placedCubes, newCollision];
+                        setPlacedCubes(newCubes);
+                        setSelectedCubeId(newCollision.id);
+                        sendCubeUpdate(newCubes);
+                      }}
+                      style={{
+                        padding:'10px',
+                        borderRadius:8,
+                        border: (selectedSectionIndex === 1 && isInSection && selectedItemIndex === 1)
+                          ? '2px solid #3b82f6'
+                          : '1px solid rgba(245, 158, 11, 0.3)',
+                        background: (selectedSectionIndex === 1 && isInSection && selectedItemIndex === 1)
+                          ? 'rgba(59, 130, 246, 0.3)'
+                          : 'rgba(120, 53, 15, 0.5)',
+                        color:'#ffffff',
+                        cursor:'pointer',
+                        fontSize:10,
+                        fontWeight:600,
+                        transition:'all 0.2s',
+                        boxShadow: (selectedSectionIndex === 1 && isInSection && selectedItemIndex === 1)
+                          ? '0 0 15px rgba(59, 130, 246, 0.5)'
+                          : 'none'
+                      }}
+                      onMouseEnter={e => {
+                        if (!(selectedSectionIndex === 1 && isInSection && selectedItemIndex === 1)) {
+                          e.currentTarget.style.background = 'rgba(120, 53, 15, 0.7)';
+                        }
+                      }}
+                      onMouseLeave={e => {
+                        if (!(selectedSectionIndex === 1 && isInSection && selectedItemIndex === 1)) {
+                          e.currentTarget.style.background = 'rgba(120, 53, 15, 0.5)';
+                        }
+                      }}
+                    >
+                      ⚫ Sphere
+                    </button>
+                    <button
+                      onClick={() => {
+                        const avatar = window.__CF_LOCAL_AVATAR__ || {};
+                        const playerX = avatar.x || 0;
+                        const playerZ = avatar.z || 0;
+                        const playerY = (typeof avatar.lift === 'number' ? avatar.lift : 0);
+                        const playerYaw = avatar.yaw || 0;
+                        const spawnDistance = 15;
+                        const spawnX = playerX + Math.sin(playerYaw) * spawnDistance;
+                        const spawnZ = playerZ + Math.cos(playerYaw) * spawnDistance;
+                        const newCollision = {
+                          id: Date.now() + Math.random(),
+                          shape: 'cylinder',
+                          position: { x: spawnX, y: playerY, z: spawnZ },
+                          rotation: { x: 0, y: 0, z: 0 },
+                          scale: { x: 10, y: 10, z: 10 },
+                          hasCollision: true,
+                          walkableTop: false,
+                          color: '#8b5cf6',
+                          opacity: 0.3
+                        };
+                        const newCubes = [...placedCubes, newCollision];
+                        setPlacedCubes(newCubes);
+                        setSelectedCubeId(newCollision.id);
+                        sendCubeUpdate(newCubes);
+                      }}
+                      style={{
+                        padding:'10px',
+                        borderRadius:8,
+                        border: (selectedSectionIndex === 1 && isInSection && selectedItemIndex === 2)
+                          ? '2px solid #3b82f6'
+                          : '1px solid rgba(139, 92, 246, 0.3)',
+                        background: (selectedSectionIndex === 1 && isInSection && selectedItemIndex === 2)
+                          ? 'rgba(59, 130, 246, 0.3)'
+                          : 'rgba(76, 29, 149, 0.5)',
+                        color:'#ffffff',
+                        cursor:'pointer',
+                        fontSize:10,
+                        fontWeight:600,
+                        transition:'all 0.2s',
+                        boxShadow: (selectedSectionIndex === 1 && isInSection && selectedItemIndex === 2)
+                          ? '0 0 15px rgba(59, 130, 246, 0.5)'
+                          : 'none'
+                      }}
+                      onMouseEnter={e => {
+                        if (!(selectedSectionIndex === 1 && isInSection && selectedItemIndex === 2)) {
+                          e.currentTarget.style.background = 'rgba(76, 29, 149, 0.7)';
+                        }
+                      }}
+                      onMouseLeave={e => {
+                        if (!(selectedSectionIndex === 1 && isInSection && selectedItemIndex === 2)) {
+                          e.currentTarget.style.background = 'rgba(76, 29, 149, 0.5)';
+                        }
+                      }}
+                    >
+                      🔵 Cylinder
+                    </button>
+                    <button
+                      onClick={() => {
+                        const avatar = window.__CF_LOCAL_AVATAR__ || {};
+                        const playerX = avatar.x || 0;
+                        const playerZ = avatar.z || 0;
+                        const playerY = (typeof avatar.lift === 'number' ? avatar.lift : 0);
+                        const playerYaw = avatar.yaw || 0;
+                        const spawnDistance = 15;
+                        const spawnX = playerX + Math.sin(playerYaw) * spawnDistance;
+                        const spawnZ = playerZ + Math.cos(playerYaw) * spawnDistance;
+                        const newCollision = {
+                          id: Date.now() + Math.random(),
+                          shape: 'capsule',
+                          position: { x: spawnX, y: playerY, z: spawnZ },
+                          rotation: { x: 0, y: 0, z: 0 },
+                          scale: { x: 10, y: 10, z: 10 },
+                          hasCollision: true,
+                          walkableTop: false,
+                          color: '#06b6d4',
+                          opacity: 0.3
+                        };
+                        const newCubes = [...placedCubes, newCollision];
+                        setPlacedCubes(newCubes);
+                        setSelectedCubeId(newCollision.id);
+                        sendCubeUpdate(newCubes);
+                      }}
+                      style={{
+                        padding:'10px',
+                        borderRadius:8,
+                        border: (selectedSectionIndex === 1 && isInSection && selectedItemIndex === 3)
+                          ? '2px solid #3b82f6'
+                          : '1px solid rgba(6, 182, 212, 0.3)',
+                        background: (selectedSectionIndex === 1 && isInSection && selectedItemIndex === 3)
+                          ? 'rgba(59, 130, 246, 0.3)'
+                          : 'rgba(8, 51, 68, 0.5)',
+                        color:'#ffffff',
+                        cursor:'pointer',
+                        fontSize:10,
+                        fontWeight:600,
+                        transition:'all 0.2s',
+                        boxShadow: (selectedSectionIndex === 1 && isInSection && selectedItemIndex === 3)
+                          ? '0 0 15px rgba(59, 130, 246, 0.5)'
+                          : 'none'
+                      }}
+                      onMouseEnter={e => {
+                        if (!(selectedSectionIndex === 1 && isInSection && selectedItemIndex === 3)) {
+                          e.currentTarget.style.background = 'rgba(8, 51, 68, 0.7)';
+                        }
+                      }}
+                      onMouseLeave={e => {
+                        if (!(selectedSectionIndex === 1 && isInSection && selectedItemIndex === 3)) {
+                          e.currentTarget.style.background = 'rgba(8, 51, 68, 0.5)';
+                        }
+                      }}
+                    >
+                      💊 Capsule
+                    </button>
+                  </div>
+                </div>
+
+                {/* Terrain Builder Section */}
+                <div 
+                  style={{ 
+                    background: 'rgba(34, 197, 94, 0.08)', 
+                    padding:'14px', 
+                    borderRadius:10,
+                    border:'1px solid rgba(34, 197, 94, 0.2)',
+                    marginTop: 8
+                  }}
+                >
+                  <div style={{ fontWeight:600, fontSize:12, color:'#6ee7b7', marginBottom:10 }}>🏔️ Terrain Builder</div>
+                  
+                  {/* Create New Terrain Button */}
+                  <button
+                    onClick={() => {
+                      const avatar = window.__CF_LOCAL_AVATAR__ || {};
+                      const playerX = avatar.x || 0;
+                      const playerZ = avatar.z || 0;
+                      const playerY = (typeof avatar.lift === 'number' ? avatar.lift : 0);
+                      
+                      // Create terrain 10 units below player's feet
+                      const terrainY = playerY - 10;
+                      
+                      const newTerrain = {
+                        id: Date.now() + Math.random(),
+                        shape: 'box',
+                        isTerrain: true,
+                        position: { x: playerX, y: terrainY, z: playerZ },
+                        rotation: { x: 0, y: 0, z: 0 },
+                        scale: { x: 50, y: 2.0, z: 50 }, // 2.0 height like platforms
+                        hasCollision: true,
+                        walkableTop: true,
+                        color: '#22c55e',
+                        opacity: 1,
+                        texture: null, // Start with no texture (green) - user can select one
+                        terrainHeight: 2.0,
+                        textureRepeat: 10, // Texture tiling ratio (higher = more tiles)
+                        // Terrain generation settings
+                        hasTerrainNoise: false, // Start flat, user can enable
+                        terrainSegments: 100, // Resolution of terrain mesh
+                        terrainScale: 0.015, // Noise scale for hills
+                        terrainHeightMultiplier: 8, // Height of small hills
+                        terrainMoundScale: 0.008, // Scale for larger mounds
+                        terrainMoundMultiplier: 15, // Height of large mounds
+                        terrainOctaves: 4, // Fractal noise octaves
+                        terrainEdgeBlend: 0.25 // How much of the edge to blend (0.1 = 10%, 0.5 = 50%)
+                      };
+                      const newCubes = [...placedCubes, newTerrain];
+                      setPlacedCubes(newCubes);
+                      setSelectedCubeId(newTerrain.id);
+                      sendCubeUpdate(newCubes);
+                    }}
+                    style={{
+                      width: '100%',
+                      padding:'12px',
+                      borderRadius:8,
+                      border:'1px solid rgba(34, 197, 94, 0.3)',
+                      background:'rgba(22, 163, 74, 0.3)',
+                      color:'#ffffff',
+                      cursor:'pointer',
+                      fontSize:11,
+                      fontWeight:600,
+                      transition:'all 0.2s',
+                      marginBottom: 10
+                    }}
+                    onMouseEnter={e => e.currentTarget.style.background = 'rgba(22, 163, 74, 0.5)'}
+                    onMouseLeave={e => e.currentTarget.style.background = 'rgba(22, 163, 74, 0.3)'}
+                  >
+                    ➕ Create New Terrain
+                  </button>
+
+                  {/* Terrain Editor - Only show if a terrain is selected */}
+                  {selectedCubeId && placedCubes.find(c => c.id === selectedCubeId && c.isTerrain) && (() => {
+                    const selectedTerrain = placedCubes.find(c => c.id === selectedCubeId);
+                    return (
+                      <div style={{ 
+                        padding: '10px', 
+                        background: 'rgba(22, 163, 74, 0.15)', 
+                        borderRadius: 8,
+                        border: '1px solid rgba(34, 197, 94, 0.3)',
+                        marginBottom: 10
+                      }}>
+                        <div style={{ fontSize: 10, color: '#6ee7b7', marginBottom: 8, fontWeight: 600 }}>
+                          🎨 Editing: Terrain #{selectedCubeId.toString().slice(-4)}
                         </div>
-                        <label style={{ display:'flex', alignItems:'center', gap:6, marginTop:4 }} onClick={(e) => e.stopPropagation()}>
+
+                        {/* Height Slider */}
+                        <div style={{ marginBottom: 10 }}>
+                          <label style={{ fontSize: 9, color: '#94a3b8', display: 'block', marginBottom: 4 }}>
+                            Height: {selectedTerrain.scale?.y || 1}
+                          </label>
+                          <input 
+                            type="range"
+                            min="0.1"
+                            max="20"
+                            step="0.1"
+                            value={selectedTerrain.scale?.y || 1}
+                            onChange={(e) => {
+                              e.stopPropagation();
+                              const newHeight = parseFloat(e.target.value);
+                              updateCubeAndSync(selectedCubeId, { 
+                                scale: { 
+                                  ...(selectedTerrain.scale || { x: 50, y: 1, z: 50 }),
+                                  y: newHeight 
+                                }
+                              });
+                            }}
+                            onMouseDown={(e) => e.stopPropagation()}
+                            onMouseUp={(e) => e.stopPropagation()}
+                            style={{
+                              width: '100%',
+                              height: '6px',
+                              borderRadius: '3px',
+                              background: 'rgba(148, 163, 184, 0.2)',
+                              cursor: 'pointer'
+                            }}
+                          />
+                        </div>
+
+                        {/* Width Slider */}
+                        <div style={{ marginBottom: 10 }}>
+                          <label style={{ fontSize: 9, color: '#94a3b8', display: 'block', marginBottom: 4 }}>
+                            Width: {selectedTerrain.scale?.x || 50}
+                          </label>
+                          <input 
+                            type="range"
+                            min="5"
+                            max="200"
+                            step="5"
+                            value={selectedTerrain.scale?.x || 50}
+                            onChange={(e) => {
+                              e.stopPropagation();
+                              const newWidth = parseFloat(e.target.value);
+                              updateCubeAndSync(selectedCubeId, { 
+                                scale: { 
+                                  ...(selectedTerrain.scale || { x: 50, y: 1, z: 50 }),
+                                  x: newWidth 
+                                }
+                              });
+                            }}
+                            onMouseDown={(e) => e.stopPropagation()}
+                            onMouseUp={(e) => e.stopPropagation()}
+                            style={{
+                              width: '100%',
+                              height: '6px',
+                              borderRadius: '3px',
+                              background: 'rgba(148, 163, 184, 0.2)',
+                              cursor: 'pointer'
+                            }}
+                          />
+                        </div>
+
+                        {/* Depth Slider */}
+                        <div style={{ marginBottom: 10 }}>
+                          <label style={{ fontSize: 9, color: '#94a3b8', display: 'block', marginBottom: 4 }}>
+                            Depth: {selectedTerrain.scale?.z || 50}
+                          </label>
+                          <input 
+                            type="range"
+                            min="5"
+                            max="200"
+                            step="5"
+                            value={selectedTerrain.scale?.z || 50}
+                            onChange={(e) => {
+                              e.stopPropagation();
+                              const newDepth = parseFloat(e.target.value);
+                              updateCubeAndSync(selectedCubeId, { 
+                                scale: { 
+                                  ...(selectedTerrain.scale || { x: 50, y: 1, z: 50 }),
+                                  z: newDepth 
+                                }
+                              });
+                            }}
+                            onMouseDown={(e) => e.stopPropagation()}
+                            onMouseUp={(e) => e.stopPropagation()}
+                            style={{
+                              width: '100%',
+                              height: '6px',
+                              borderRadius: '3px',
+                              background: 'rgba(148, 163, 184, 0.2)',
+                              cursor: 'pointer'
+                            }}
+                          />
+                        </div>
+
+                        {/* Texture Selector */}
+                        <div style={{ marginBottom: 8 }}>
+                          <label style={{ fontSize: 9, color: '#94a3b8', display: 'block', marginBottom: 4 }}>
+                            Terrain Texture
+                          </label>
+                          <select
+                            value={selectedTerrain.texture || ''}
+                            onChange={(e) => {
+                              const newTexture = e.target.value === '' ? null : e.target.value;
+                              console.log('[TEXTURE SELECTOR] 🎨 User changed texture to:', newTexture, 'for cube:', selectedCubeId);
+                              console.log('[TEXTURE SELECTOR] 🔍 Current cube before update:', placedCubes.find(c => c.id === selectedCubeId));
+                              updateCubeAndSync(selectedCubeId, { texture: newTexture });
+                              // Check state after a tick
+                              setTimeout(() => {
+                                const updated = placedCubes.find(c => c.id === selectedCubeId);
+                                console.log('[TEXTURE SELECTOR] 🔍 Cube after update (1 tick):', updated);
+                                console.log('[TEXTURE SELECTOR] 🔍 Texture in state:', updated?.texture);
+                              }, 100);
+                            }}
+                            style={{
+                              width: '100%',
+                              padding: '6px',
+                              borderRadius: 6,
+                              border: '1px solid rgba(34, 197, 94, 0.3)',
+                              background: '#1e293b',
+                              color: '#ffffff',
+                              fontSize: 10,
+                              cursor: 'pointer'
+                            }}
+                          >
+                            <option value="">🟢 No Texture (Green)</option>
+                            <option value="/textures/lunar_surface.png">🌙 Lunar Surface</option>
+                            <option value="/textures/metal_floor.png">🔩 Metal Floor</option>
+                            <option value="/textures/metal_stairs.png">🪜 Metal Stairs</option>
+                          </select>
+                        </div>
+
+                        {/* Texture Tiling Control */}
+                        {selectedTerrain.texture && (
+                          <div style={{ marginBottom: 8 }}>
+                            <label style={{ fontSize: 9, color: '#94a3b8', display: 'block', marginBottom: 2 }}>
+                              Texture Tiling: {selectedTerrain.textureRepeat || 10}x
+                            </label>
+                            <input
+                              type="range"
+                              min="1"
+                              max="50"
+                              step="1"
+                              value={selectedTerrain.textureRepeat || 10}
+                              onChange={(e) => {
+                                updateCubeAndSync(selectedCubeId, { textureRepeat: parseInt(e.target.value) });
+                              }}
+                              style={{
+                                width: '100%',
+                                height: '6px',
+                                borderRadius: '3px',
+                                background: 'rgba(148, 163, 184, 0.2)',
+                                cursor: 'pointer'
+                              }}
+                            />
+                          </div>
+                        )}
+
+                        {/* Terrain Generation Toggle */}
+                        <div style={{ marginBottom: 8, padding: 8, background: 'rgba(34, 197, 94, 0.1)', borderRadius: 6 }}>
+                          <label style={{ fontSize: 10, color: '#22c55e', display: 'flex', alignItems: 'center', cursor: 'pointer' }}>
+                            <input
+                              type="checkbox"
+                              checked={selectedTerrain.hasTerrainNoise || false}
+                              onChange={(e) => {
+                                // When enabling terrain generation, also enable collision and walkability
+                                updateCubeAndSync(selectedCubeId, { 
+                                  hasTerrainNoise: e.target.checked,
+                                  hasCollision: e.target.checked ? true : selectedTerrain.hasCollision,
+                                  walkableTop: e.target.checked ? true : selectedTerrain.walkableTop
+                                });
+                              }}
+                              style={{ marginRight: 6, cursor: 'pointer' }}
+                            />
+                            🏔️ Enable Terrain Generation
+                          </label>
+                        </div>
+
+                        {/* Terrain Generation Controls - Only show if enabled */}
+                        {selectedTerrain.hasTerrainNoise && (
+                          <div style={{ padding: 8, background: 'rgba(34, 197, 94, 0.05)', borderRadius: 6, marginBottom: 8 }}>
+                            <div style={{ fontSize: 9, color: '#22c55e', marginBottom: 8, fontWeight: 'bold' }}>
+                              Terrain Generation
+                            </div>
+
+                            {/* Terrain Resolution */}
+                            <div style={{ marginBottom: 8 }}>
+                              <label style={{ fontSize: 9, color: '#94a3b8', display: 'block', marginBottom: 2 }}>
+                                Resolution: {selectedTerrain.terrainSegments || 100}
+                              </label>
+                              <input
+                                type="range"
+                                min="50"
+                                max="200"
+                                step="10"
+                                value={selectedTerrain.terrainSegments || 100}
+                                onChange={(e) => {
+                                  updateCubeAndSync(selectedCubeId, { terrainSegments: parseInt(e.target.value) });
+                                }}
+                                style={{ width: '100%' }}
+                              />
+                            </div>
+
+                            {/* Hill Height */}
+                            <div style={{ marginBottom: 8 }}>
+                              <label style={{ fontSize: 9, color: '#94a3b8', display: 'block', marginBottom: 2 }}>
+                                Hill Height: {selectedTerrain.terrainHeightMultiplier || 8}
+                              </label>
+                              <input
+                                type="range"
+                                min="0"
+                                max="20"
+                                step="1"
+                                value={selectedTerrain.terrainHeightMultiplier || 8}
+                                onChange={(e) => {
+                                  updateCubeAndSync(selectedCubeId, { terrainHeightMultiplier: parseFloat(e.target.value) });
+                                }}
+                                style={{ width: '100%' }}
+                              />
+                            </div>
+
+                            {/* Hill Scale (Frequency) */}
+                            <div style={{ marginBottom: 8 }}>
+                              <label style={{ fontSize: 9, color: '#94a3b8', display: 'block', marginBottom: 2 }}>
+                                Hill Frequency: {(selectedTerrain.terrainScale || 0.015).toFixed(3)}
+                              </label>
+                              <input
+                                type="range"
+                                min="0.005"
+                                max="0.05"
+                                step="0.001"
+                                value={selectedTerrain.terrainScale || 0.015}
+                                onChange={(e) => {
+                                  updateCubeAndSync(selectedCubeId, { terrainScale: parseFloat(e.target.value) });
+                                }}
+                                style={{ width: '100%' }}
+                              />
+                            </div>
+
+                            {/* Mound Height */}
+                            <div style={{ marginBottom: 8 }}>
+                              <label style={{ fontSize: 9, color: '#94a3b8', display: 'block', marginBottom: 2 }}>
+                                Mound Height: {selectedTerrain.terrainMoundMultiplier || 15}
+                              </label>
+                              <input
+                                type="range"
+                                min="0"
+                                max="30"
+                                step="1"
+                                value={selectedTerrain.terrainMoundMultiplier || 15}
+                                onChange={(e) => {
+                                  updateCubeAndSync(selectedCubeId, { terrainMoundMultiplier: parseFloat(e.target.value) });
+                                }}
+                                style={{ width: '100%' }}
+                              />
+                            </div>
+
+                            {/* Mound Scale */}
+                            <div style={{ marginBottom: 8 }}>
+                              <label style={{ fontSize: 9, color: '#94a3b8', display: 'block', marginBottom: 2 }}>
+                                Mound Frequency: {(selectedTerrain.terrainMoundScale || 0.008).toFixed(3)}
+                              </label>
+                              <input
+                                type="range"
+                                min="0.002"
+                                max="0.02"
+                                step="0.001"
+                                value={selectedTerrain.terrainMoundScale || 0.008}
+                                onChange={(e) => {
+                                  updateCubeAndSync(selectedCubeId, { terrainMoundScale: parseFloat(e.target.value) });
+                                }}
+                                style={{ width: '100%' }}
+                              />
+                            </div>
+
+                            {/* Octaves (Detail) */}
+                            <div style={{ marginBottom: 8 }}>
+                              <label style={{ fontSize: 9, color: '#94a3b8', display: 'block', marginBottom: 2 }}>
+                                Detail (Octaves): {selectedTerrain.terrainOctaves || 4}
+                              </label>
+                              <input
+                                type="range"
+                                min="1"
+                                max="8"
+                                step="1"
+                                value={selectedTerrain.terrainOctaves || 4}
+                                onChange={(e) => {
+                                  updateCubeAndSync(selectedCubeId, { terrainOctaves: parseInt(e.target.value) });
+                                }}
+                                style={{ width: '100%' }}
+                              />
+                            </div>
+
+                            {/* Edge Blend */}
+                            <div style={{ marginBottom: 8 }}>
+                              <label style={{ fontSize: 9, color: '#94a3b8', display: 'block', marginBottom: 2 }}>
+                                Edge Smoothness: {((selectedTerrain.terrainEdgeBlend || 0.25) * 100).toFixed(0)}%
+                              </label>
+                              <input
+                                type="range"
+                                min="0.05"
+                                max="0.5"
+                                step="0.05"
+                                value={selectedTerrain.terrainEdgeBlend || 0.25}
+                                onChange={(e) => {
+                                  updateCubeAndSync(selectedCubeId, { terrainEdgeBlend: parseFloat(e.target.value) });
+                                }}
+                                style={{ width: '100%' }}
+                              />
+                            </div>
+                          </div>
+                        )}
+
+                        {/* Walkable Checkbox */}
+                        <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 10, color: '#cbd5e1', cursor: 'pointer' }}>
                           <input 
                             type="checkbox" 
-                            checked={cube.hasCollision} 
-                            onChange={(e) => { e.stopPropagation(); updateCubeAndSync(cube.id, { hasCollision: e.target.checked }); }} 
+                            checked={selectedTerrain.walkableTop || false} 
+                            onChange={(e) => updateCubeAndSync(selectedCubeId, { walkableTop: e.target.checked })}
+                            style={{ cursor: 'pointer' }}
                           /> 
-                          Collision
-                        </label>
-                        <label style={{ display:'flex', alignItems:'center', gap:6, marginTop:4 }} onClick={(e) => e.stopPropagation()}>
-                          <input 
-                            type="checkbox" 
-                            checked={cube.walkableTop || false} 
-                            onChange={(e) => { e.stopPropagation(); updateCubeAndSync(cube.id, { walkableTop: e.target.checked }); }} 
-                            disabled={!cube.hasCollision}
-                          /> 
-                          Walkable Top
+                          <span>Walkable Surface</span>
                         </label>
                       </div>
-                    ))
-                  )}
+                    );
+                  })()}
+
+                  {/* Terrain List */}
+                  <div style={{ 
+                    padding: '8px', 
+                    background: 'rgba(22, 163, 74, 0.08)', 
+                    borderRadius: 8,
+                    border: '1px solid rgba(34, 197, 94, 0.2)'
+                  }}>
+                    <div style={{ fontSize: 10, color: '#6ee7b7', marginBottom: 6, fontWeight: 600 }}>
+                      🗺️ Terrain Pieces ({placedCubes.filter(c => c.isTerrain).length})
+                    </div>
+                    <div style={{ maxHeight: 150, overflowY: 'auto' }}>
+                      {placedCubes.filter(c => c.isTerrain).length === 0 ? (
+                        <div style={{ padding: 8, color: '#64748b', fontSize: 9, textAlign: 'center' }}>
+                          No terrain created yet
+                        </div>
+                      ) : (
+                        placedCubes.filter(c => c.isTerrain).map((terrain, idx) => (
+                          <div
+                            key={terrain.id}
+                            onClick={() => setSelectedCubeId(terrain.id)}
+                            style={{
+                              padding: '6px 8px',
+                              marginBottom: 4,
+                              borderRadius: 6,
+                              border: selectedCubeId === terrain.id ? '2px solid #22c55e' : '1px solid rgba(34, 197, 94, 0.2)',
+                              background: selectedCubeId === terrain.id ? 'rgba(34, 197, 94, 0.25)' : 'rgba(22, 163, 74, 0.1)',
+                              cursor: 'pointer',
+                              fontSize: 9,
+                              color: '#e2e8f0',
+                              transition: 'all 0.2s',
+                              display: 'flex',
+                              justifyContent: 'space-between',
+                              alignItems: 'center'
+                            }}
+                          >
+                            <span>
+                              🏔️ Terrain #{idx + 1}
+                              <span style={{ color: '#94a3b8', marginLeft: 6, fontSize: 8 }}>
+                                {terrain.scale?.x || 50}×{terrain.scale?.z || 50}
+                              </span>
+                            </span>
+                            <div style={{ display: 'flex', gap: 4 }}>
+                              <button
+                                onClick={(e) => { e.stopPropagation(); duplicateCube(terrain.id); }}
+                                style={{
+                                  padding: '2px 6px',
+                                  borderRadius: 4,
+                                  border: '1px solid rgba(148, 163, 184, 0.2)',
+                                  background: 'rgba(30, 41, 59, 0.6)',
+                                  color: '#cbd5e1',
+                                  fontSize: 8,
+                                  cursor: 'pointer',
+                                  transition: 'all 0.2s'
+                                }}
+                                onMouseEnter={e => e.currentTarget.style.background = 'rgba(30, 41, 59, 0.8)'}
+                                onMouseLeave={e => e.currentTarget.style.background = 'rgba(30, 41, 59, 0.6)'}
+                                title="Duplicate Terrain"
+                              >
+                                📋
+                              </button>
+                              <button
+                                onClick={(e) => { e.stopPropagation(); deleteCube(terrain.id); }}
+                                style={{
+                                  padding: '2px 6px',
+                                  borderRadius: 4,
+                                  border: '1px solid rgba(239, 68, 68, 0.3)',
+                                  background: 'rgba(127, 29, 29, 0.5)',
+                                  color: '#fca5a5',
+                                  fontSize: 8,
+                                  cursor: 'pointer',
+                                  transition: 'all 0.2s'
+                                }}
+                                onMouseEnter={e => e.currentTarget.style.background = 'rgba(127, 29, 29, 0.7)'}
+                                onMouseLeave={e => e.currentTarget.style.background = 'rgba(127, 29, 29, 0.5)'}
+                              >
+                                🗑️
+                              </button>
+                            </div>
+                          </div>
+                        ))
+                      )}
+                    </div>
+                  </div>
+                </div>
+          
+              </>
+            )}
+            
+            {/* MODELS TAB */}
+            {activeEditorTab === 'models' && (
+              <>
+                <div style={{ 
+                  background:'rgba(168, 85, 247, 0.08)', 
+                  padding:'14px', 
+                  borderRadius:10,
+                  border:'1px solid rgba(168, 85, 247, 0.2)'
+                }}>
+                  <div style={{ fontWeight:600, fontSize:12, color:'#c084fc', marginBottom:10 }}>🎨 Model Library</div>
+                  
+                  {/* Model Selector Dropdown */}
+                  <select 
+                    value={selectedModelToLoad || ''} 
+                    onChange={(e) => setSelectedModelToLoad(e.target.value)}
+                    style={{
+                      width: '100%',
+                      padding: '10px',
+                      borderRadius: 8,
+                      border: '1px solid rgba(168, 85, 247, 0.3)',
+                      background: '#1e293b',
+                      color: '#ffffff',
+                      fontSize: 11,
+                      fontWeight: 600,
+                      cursor: 'pointer',
+                      marginBottom: 10,
+                      appearance: 'none',
+                      backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%23ffffff' d='M6 9L1 4h10z'/%3E%3C/svg%3E")`,
+                      backgroundRepeat: 'no-repeat',
+                      backgroundPosition: 'right 12px center',
+                      paddingRight: '32px'
+                    }}
+                  >
+                    <option value="" disabled>Select a model...</option>
+                    {availableModels.map((model, idx) => {
+                      const displayName = model.name.split(/[-_]/).map(w => 
+                        w.charAt(0).toUpperCase() + w.slice(1)
+                      ).join(' ');
+                      const label = model.path ? displayName : `${displayName} (no model file)`;
+                      return (
+                        <option 
+                          key={idx} 
+                          value={idx}
+                          style={{ 
+                            background: '#1e293b', 
+                            color: '#ffffff',
+                            padding: '8px'
+                          }}
+                        >
+                          {label}
+                        </option>
+                      );
+                    })}
+                  </select>
+                  
+                  {/* Load Model Button */}
+                  <button
+                    onClick={() => {
+                      if (selectedModelToLoad === null || selectedModelToLoad === '') {
+                        console.log('Please select a model first');
+                        return;
+                      }
+                      
+                      const model = availableModels[parseInt(selectedModelToLoad)];
+                      if (!model || !model.path) {
+                        console.log('Selected model has no file');
+                        return;
+                      }
+                      
+                      // Create a cube with this custom model
+                      const avatar = window.__CF_LOCAL_AVATAR__ || {};
+                      const playerX = avatar.x || 0;
+                      const playerZ = avatar.z || 0;
+                      const playerY = (typeof avatar.lift === 'number' ? avatar.lift : 0);
+                      const playerYaw = avatar.yaw || 0;
+                      const spawnDistance = 15;
+                      const spawnX = playerX + Math.sin(playerYaw) * spawnDistance;
+                      const spawnZ = playerZ + Math.cos(playerYaw) * spawnDistance;
+                      
+                      const newCube = {
+                        id: Date.now() + Math.random(),
+                        shape: 'box',
+                        modelType: 'custom',
+                        customModelPath: model.path,
+                        customModelName: model.name,
+                        position: { x: spawnX, y: playerY, z: spawnZ },
+                        rotation: { x: 0, y: 0, z: 0 },
+                        scale: { x: 0.1, y: 0.1, z: 0.1 },
+                        hasCollision: false,
+                        walkableTop: false,
+                        color: '#3b82f6'
+                      };
+                      
+                      const newCubes = [...placedCubes, newCube];
+                      setPlacedCubes(newCubes);
+                      setSelectedCubeId(newCube.id);
+                      sendCubeUpdate(newCubes);
+                      
+                      console.log(`✅ Loaded model: ${model.name}`);
+                    }}
+                    style={{ 
+                      width: '100%',
+                      padding:'12px', 
+                      borderRadius:8, 
+                      border:'1px solid rgba(168, 85, 247, 0.3)', 
+                      background:'rgba(88, 28, 135, 0.5)', 
+                      color:'#ffffff', 
+                      cursor:'pointer',
+                      fontSize: 12,
+                      fontWeight: 600,
+                      transition:'all 0.2s'
+                    }}
+                    onMouseEnter={e => e.currentTarget.style.background = 'rgba(88, 28, 135, 0.8)'}
+                    onMouseLeave={e => e.currentTarget.style.background = 'rgba(88, 28, 135, 0.5)'}
+                  >
+                    📦 Load Model
+                  </button>
                 </div>
                 
-                {/* Selected cube OR visualizer controls */}
-                {(selectedCubeId && placedCubes.find(c => c.id === selectedCubeId)) || (selectedVisualizer && audioVisualizers.find(v => v.id === selectedVisualizer)) ? (
-                  <div style={{ marginTop:8, padding:6, border:'1px solid #10b981', borderRadius:6, background:'#064e3b' }}>
-                    <div style={{ fontWeight:600, color:'#d1fae5', marginBottom:6 }}>
-                      {selectedCubeId ? 
-                        `Editing Cube #${placedCubes.findIndex(c => c.id === selectedCubeId) + 1}` :
+                {/* Upload New Model Section */}
+                <div style={{ 
+                  background:'rgba(168, 85, 247, 0.08)', 
+                  padding:'14px', 
+                  borderRadius:10,
+                  border:'1px solid rgba(168, 85, 247, 0.2)',
+                  marginTop: 10
+                }}>
+                  <div style={{ fontWeight:600, fontSize:12, color:'#c084fc', marginBottom:10 }}>📁 Upload Model</div>
+                  
+                  <label style={{ cursor: 'pointer' }}>
+                    <div
+                      style={{
+                        padding:'12px',
+                        borderRadius:8,
+                        border:'1px solid rgba(168, 85, 247, 0.3)',
+                        background:'rgba(88, 28, 135, 0.5)',
+                        color:'#ffffff',
+                        cursor:'pointer',
+                        fontSize:11,
+                        fontWeight:600,
+                        textAlign:'center',
+                        transition:'all 0.2s'
+                      }}
+                      onMouseEnter={e => e.currentTarget.style.background = 'rgba(88, 28, 135, 0.8)'}
+                      onMouseLeave={e => e.currentTarget.style.background = 'rgba(88, 28, 135, 0.5)'}
+                    >
+                      📁 Click to Select Model Folder
+                      <div style={{ fontSize: '9px', marginTop: '6px', opacity: 0.8, lineHeight: '1.4' }}>
+                        Select a folder containing your model (.fbx, .glb, etc)<br/>
+                        and its textures
+                      </div>
+                      <input
+                        type="file"
+                        webkitdirectory=""
+                        directory=""
+                        multiple
+                        style={{ display: 'none' }}
+                        onChange={(e) => {
+                          const files = Array.from(e.target.files);
+                          if (files.length === 0) {
+                            alert('No files selected. Please select a folder.');
+                            return;
+                          }
+                          
+                          // Check if there's a model file
+                          const modelExtensions = ['.fbx', '.glb', '.gltf', '.obj', '.dae', '.stl'];
+                          const hasModel = files.some(f => {
+                            const fileName = f.name.toLowerCase();
+                            return modelExtensions.some(ext => fileName.endsWith(ext));
+                          });
+                          
+                          if (!hasModel) {
+                            const fileList = files.map(f => f.name).slice(0, 10).join(', ');
+                            alert(`No model file found.\\n\\nFiles found (first 10): ${fileList}\\n\\nPlease select a folder containing a .fbx, .glb, .gltf, .obj, .dae, or .stl file.`);
+                            return;
+                          }
+                          
+                          // Prompt user for model name
+                          const modelName = prompt('Enter a name for this model:');
+                          if (!modelName || modelName.trim() === '') {
+                            alert('Model name is required. Upload cancelled.');
+                            return;
+                          }
+                          
+                          const formData = new FormData();
+                          files.forEach(file => {
+                            formData.append('models', file);
+                          });
+                          formData.append('modelName', modelName);
+                          
+                          fetch('/api/upload-model', {
+                            method: 'POST',
+                            body: formData
+                          })
+                          .then(res => res.json())
+                          .then(data => {
+                            if (data.success && data.path) {
+                              // Refresh the available models list
+                              fetch('/api/models')
+                                .then(res => res.json())
+                                .then(data => {
+                                  if (data.models) {
+                                    setAvailableModels(data.models);
+                                    alert(`✅ Model uploaded successfully! (${data.filesUploaded || 'multiple'} files)\\n\\nYou can now find it in the Model Library dropdown above.`);
+                                  }
+                                })
+                                .catch(() => {
+                                  alert(`✅ Model uploaded! Refresh the page to see it in the library.`);
+                                });
+                              
+                              // Reset file input
+                              e.target.value = '';
+                            } else {
+                              console.error('Upload failed:', data);
+                              alert('Upload failed. Check console for details.');
+                            }
+                          })
+                          .catch(err => {
+                            console.error('Upload failed:', err);
+                            alert('Upload failed. Check console for details.');
+                            // Reset file input
+                            e.target.value = '';
+                          });
+                        }}
+                      />
+                    </div>
+                  </label>
+                </div>
+              </>
+            )}
+            
+            {/* TRANSFORM TAB */}
+            {activeEditorTab === 'transform' && (
+              <>
+                {((selectedCubeId && placedCubes.find(c => c.id === selectedCubeId)) || (selectedVisualizer && audioVisualizers.find(v => v.id === selectedVisualizer))) ? (
+                  <div style={{ 
+                    background:'rgba(16, 185, 129, 0.12)', 
+                    padding:'14px', 
+                    borderRadius:10,
+                    border:'2px solid rgba(16, 185, 129, 0.3)'
+                  }}>
+                    <div style={{ fontWeight:600, fontSize:13, color:'#6ee7b7', marginBottom:10 }}>
+                      ✨ {selectedCubeId ? 
+                        `Editing Object #${placedCubes.findIndex(c => c.id === selectedCubeId) + 1}` :
                         `Editing ${audioVisualizers.find(v => v.id === selectedVisualizer)?.label || 'Audio Zone'}`
                       }
                     </div>
                     
-                    {/* Drag mode toggle - only for cubes, not visualizers */}
+                    {/* Drag mode toggle - only for cubes */}
                     {selectedCubeId && (
-                      <label style={{ display:'flex', alignItems:'center', gap:6, marginBottom:6, cursor:'pointer' }}>
-                        <input type="checkbox" checked={cubeDragMode} onChange={e=>setCubeDragMode(e.target.checked)} />
-                        <span style={{ fontSize:11, color:'#d1fae5' }}>🖱️ Free Drag Mode (follows terrain)</span>
+                      <label style={{ display:'flex', alignItems:'center', gap:10, marginBottom:10, fontSize:11, cursor:'pointer', background:'rgba(15, 23, 42, 0.3)', padding:'10px', borderRadius:8 }}>
+                        <input type="checkbox" checked={cubeDragMode} onChange={e=>setCubeDragMode(e.target.checked)} style={{ cursor:'pointer' }} />
+                        <span style={{ fontWeight:500 }}>�️ Free Drag (follows terrain)</span>
                       </label>
                     )}
                     
-                    {/* Transform mode buttons - always visible */}
-                    <div style={{ display:'flex', gap:6, flexWrap:'wrap', marginBottom:6 }}>
-                      <button onClick={()=>setCubeTransformMode('translate')} style={{ padding:'2px 6px', borderRadius:6, border:'1px solid #334155', background: cubeTransformMode==='translate'?'#1e293b':'#0f172a', color:'#ffffff', fontSize:11 }}>Move</button>
-                      <button onClick={()=>setCubeTransformMode('rotate')} style={{ padding:'2px 6px', borderRadius:6, border:'1px solid #334155', background: cubeTransformMode==='rotate'?'#1e293b':'#0f172a', color:'#ffffff', fontSize:11 }}>Rotate</button>
-                      <button onClick={()=>setCubeTransformMode('scale')} style={{ padding:'2px 6px', borderRadius:6, border:'1px solid #334155', background: cubeTransformMode==='scale'?'#1e293b':'#0f172a', color:'#ffffff', fontSize:11 }}>Scale</button>
+                    {/* Transform mode buttons */}
+                    <div style={{ marginBottom:10 }}>
+                      <div style={{ fontSize:10, color:'#94a3b8', marginBottom:6, fontWeight:600 }}>TRANSFORM MODE</div>
+                      <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr 1fr', gap:6 }}>
+                        <button 
+                          onClick={()=>setCubeTransformMode('translate')} 
+                          style={{ 
+                            padding:'10px', 
+                            borderRadius:8, 
+                            border: cubeTransformMode==='translate' ? '2px solid #10b981' : '1px solid rgba(148, 163, 184, 0.2)', 
+                            background: cubeTransformMode==='translate' ? 'rgba(6, 78, 59, 0.6)' : 'rgba(15, 23, 42, 0.4)', 
+                            color:'#ffffff', 
+                            fontSize:11,
+                            fontWeight:600,
+                            cursor:'pointer',
+                            transition:'all 0.2s'
+                          }}
+                        >
+                          Move
+                        </button>
+                        <button 
+                          onClick={()=>setCubeTransformMode('rotate')} 
+                          style={{ 
+                            padding:'10px', 
+                            borderRadius:8, 
+                            border: cubeTransformMode==='rotate' ? '2px solid #10b981' : '1px solid rgba(148, 163, 184, 0.2)', 
+                            background: cubeTransformMode==='rotate' ? 'rgba(6, 78, 59, 0.6)' : 'rgba(15, 23, 42, 0.4)', 
+                            color:'#ffffff', 
+                            fontSize:11,
+                            fontWeight:600,
+                            cursor:'pointer',
+                            transition:'all 0.2s'
+                          }}
+                        >
+                          Rotate
+                        </button>
+                        <button 
+                          onClick={()=>setCubeTransformMode('scale')} 
+                          style={{ 
+                            padding:'10px', 
+                            borderRadius:8, 
+                            border: cubeTransformMode==='scale' ? '2px solid #10b981' : '1px solid rgba(148, 163, 184, 0.2)', 
+                            background: cubeTransformMode==='scale' ? 'rgba(6, 78, 59, 0.6)' : 'rgba(15, 23, 42, 0.4)', 
+                            color:'#ffffff', 
+                            fontSize:11,
+                            fontWeight:600,
+                            cursor:'pointer',
+                            transition:'all 0.2s'
+                          }}
+                        >
+                          Scale
+                        </button>
+                      </div>
                     </div>
                     
-                    <label style={{ display:'flex', alignItems:'center', gap:6 }}>
-                      <input type="checkbox" checked={cubeSnap} onChange={e=>setCubeSnap(e.target.checked)} /> Snap
-                    </label>
+                    {/* Snap controls */}
+                    <div style={{ background:'rgba(15, 23, 42, 0.3)', padding:'10px', borderRadius:8, marginBottom:10 }}>
+                      <label style={{ display:'flex', alignItems:'center', gap:10, fontSize:11, cursor:'pointer', marginBottom:cubeSnap?8:0 }}>
+                        <input type="checkbox" checked={cubeSnap} onChange={e=>setCubeSnap(e.target.checked)} style={{ cursor:'pointer' }} /> 
+                        <span style={{ fontWeight:600 }}>Enable Snapping</span>
+                      </label>
+                      
+                      {cubeSnap && (
+                        <div>
+                          {cubeTransformMode==='translate' && (
+                            <>
+                              <div style={{ fontSize:10, color:'#94a3b8', marginBottom:4 }}>Position Snap: {cubeTranslateSnap.toFixed(2)}u</div>
+                              <input 
+                                type="range" 
+                                min={0.1} 
+                                max={5} 
+                                step={0.1} 
+                                value={cubeTranslateSnap} 
+                                onChange={e=>setCubeTranslateSnap(parseFloat(e.target.value))} 
+                                style={{ width:'100%' }}
+                              />
+                            </>
+                          )}
+                          {cubeTransformMode==='rotate' && (
+                            <>
+                              <div style={{ fontSize:10, color:'#94a3b8', marginBottom:4 }}>Rotation Snap: {cubeRotateSnapDeg.toFixed(0)}°</div>
+                              <input 
+                                type="range" 
+                                min={1} 
+                                max={45} 
+                                step={1} 
+                                value={cubeRotateSnapDeg} 
+                                onChange={e=>setCubeRotateSnapDeg(parseFloat(e.target.value))} 
+                                style={{ width:'100%' }}
+                              />
+                            </>
+                          )}
+                          {cubeTransformMode==='scale' && (
+                            <>
+                              <div style={{ fontSize:10, color:'#94a3b8', marginBottom:4 }}>Scale Snap: {cubeScaleSnap.toFixed(2)}</div>
+                              <input 
+                                type="range" 
+                                min={0.1} 
+                                max={1} 
+                                step={0.1} 
+                                value={cubeScaleSnap} 
+                                onChange={e=>setCubeScaleSnap(parseFloat(e.target.value))} 
+                                style={{ width:'100%' }}
+                              />
+                            </>
+                          )}
+                        </div>
+                      )}
+                    </div>
                     
-                    {cubeSnap && (
-                      <>
-                            {cubeTransformMode==='translate' && (
-                              <>
-                                <label style={{ display:'flex', alignItems:'center', gap:6, fontSize:11 }}>Snap: {cubeTranslateSnap.toFixed(2)}</label>
-                                <input type="range" min={0.1} max={5} step={0.1} value={cubeTranslateSnap} onChange={e=>setCubeTranslateSnap(parseFloat(e.target.value))} />
-                              </>
-                            )}
-                            {cubeTransformMode==='rotate' && (
-                              <>
-                                <label style={{ display:'flex', alignItems:'center', gap:6, fontSize:11 }}>Snap (deg): {cubeRotateSnapDeg.toFixed(0)}</label>
-                                <input type="range" min={1} max={45} step={1} value={cubeRotateSnapDeg} onChange={e=>setCubeRotateSnapDeg(parseFloat(e.target.value))} />
-                              </>
-                            )}
-                            {cubeTransformMode==='scale' && (
-                              <>
-                                <label style={{ display:'flex', alignItems:'center', gap:6, fontSize:11 }}>Snap: {cubeScaleSnap.toFixed(2)}</label>
-                                <input type="range" min={0.1} max={1} step={0.1} value={cubeScaleSnap} onChange={e=>setCubeScaleSnap(parseFloat(e.target.value))} />
-                              </>
-                            )}
-                          </>
-                        )}
-                    
+                    {/* Action buttons */}
                     <button 
                       onClick={() => {
                         setSelectedCubeId(null);
                         setSelectedVisualizer(null);
                       }}
                       style={{ 
-                        padding:'4px 8px', 
-                        borderRadius:6, 
-                        border:'1px solid #334155', 
-                        background:'#0f172a', 
-                        color:'#e2e8f0', 
+                        padding:'10px 14px', 
+                        borderRadius:8, 
+                        border:'1px solid rgba(148, 163, 184, 0.2)', 
+                        background:'rgba(15, 23, 42, 0.6)', 
+                        color:'#cbd5e1', 
                         cursor:'pointer',
                         fontSize: 11,
                         width: '100%',
-                        marginTop: 6
+                        fontWeight:600,
+                        marginBottom:6,
+                        transition:'all 0.2s'
                       }}
                     >
                       Deselect
                     </button>
                     
-                    {/* Delete button - only show for visualizers */}
+                    {/* Delete button - only for visualizers */}
                     {selectedVisualizer && (
                       <button 
                         onClick={() => {
@@ -12501,115 +17036,227 @@ export default function ConnectFour3DView({ board, lastMove, colors, onSelectCol
                           }
                         }}
                         style={{ 
-                          padding:'4px 8px', 
-                          borderRadius:6, 
-                          border:'1px solid #dc2626', 
-                          background:'#7f1d1d', 
+                          padding:'10px 14px', 
+                          borderRadius:8, 
+                          border:'1px solid rgba(220, 38, 38, 0.3)', 
+                          background:'rgba(127, 29, 29, 0.6)', 
                           color:'#fca5a5', 
                           cursor:'pointer',
                           fontSize: 11,
                           width: '100%',
-                          marginTop: 6
+                          fontWeight:600,
+                          transition:'all 0.2s'
                         }}
                       >
                         🗑️ Delete Audio Zone
                       </button>
                     )}
                   </div>
-                ) : null}
+                ) : (
+                  <div style={{ 
+                    background:'rgba(59, 130, 246, 0.08)', 
+                    padding:'20px', 
+                    borderRadius:10,
+                    border:'1px solid rgba(59, 130, 246, 0.2)',
+                    textAlign:'center'
+                  }}>
+                    <div style={{ fontSize:40, marginBottom:10 }}>🔧</div>
+                    <div style={{ fontWeight:600, fontSize:12, color:'#60a5fa', marginBottom:6 }}>No Object Selected</div>
+                    <p style={{ fontSize:10, color:'#94a3b8', lineHeight:1.5 }}>
+                      Select an object from the Objects tab to transform it
+                    </p>
+                  </div>
+                )}
               </>
             )}
-          </div>
-          
-          {/* Audio Visualizer Tool */}
-          <div style={{ marginTop:8, paddingTop:6, borderTop:'1px solid #f59e0b' }}>
-            <div style={{ fontWeight:600, color:'#fbbf24', marginBottom:4 }}>🔊 Audio Visualizers</div>
-            <button 
-              onClick={() => {
-                // Get player's current position and facing direction
-                const avatar = window.__CF_LOCAL_AVATAR__ || {};
-                const playerX = avatar.x || 0;
-                const playerZ = avatar.z || 0;
-                const playerY = (typeof avatar.lift === 'number' ? avatar.lift : 0); // Current height (includes terrain/stairs)
-                const playerYaw = avatar.yaw || 0; // Facing direction in radians
-                
-                // Spawn distance in front of player
-                const spawnDistance = 15;
-                
-                // Calculate spawn position in front of player using their yaw
-                const spawnX = playerX + Math.sin(playerYaw) * spawnDistance;
-                const spawnZ = playerZ + Math.cos(playerYaw) * spawnDistance;
-                const spawnY = playerY; // Spawn at player's current height
-                
-                const newId = Date.now();
-                const newVisualizer = {
-                  id: newId,
-                  position: [spawnX, spawnY, spawnZ],
-                  refDistance: 10,
-                  maxDistance: 25,
-                  volume: 1.5,
-                  label: `Audio Zone ${audioVisualizers.length + 1}`,
-                  soundFile: 'rocket_ambience.mp3' // Default sound
-                };
-                addVisualizerAndSync(newVisualizer);
-                setSelectedVisualizer(newId);
-              }}
-              style={{ 
-                padding:'6px 12px', 
-                borderRadius:6, 
-                border:'1px solid #f59e0b', 
-                background:'#92400e', 
-                color:'#ffffff', 
-                cursor:'pointer',
-                fontSize: 11,
-                width: '100%',
-                fontWeight: 500
-              }}
-            >
-              + Add Audio Visualizer
-            </button>
             
-            {/* List of audio visualizers */}
-            <div style={{ marginTop:8, maxHeight:150, overflowY:'auto', border:'1px solid #334155', borderRadius:6, padding:4 }}>
-              {audioVisualizers.length === 0 ? (
-                <div style={{ padding:8, color:'#64748b', fontSize:11, textAlign:'center' }}>No visualizers placed</div>
-              ) : (
-                audioVisualizers.map((viz, idx) => (
-                  <div 
-                    key={viz.id}
-                    onClick={() => setSelectedVisualizer(viz.id)}
-                    style={{
-                      padding:'6px 8px',
-                      marginBottom:4,
-                      borderRadius:6,
-                      border: selectedVisualizer === viz.id ? '2px solid #f59e0b' : '1px solid #334155',
-                      background: selectedVisualizer === viz.id ? '#78350f' : '#0f172a',
-                      cursor:'pointer',
-                      fontSize:11
+            {/* AUDIO TAB */}
+            {activeEditorTab === 'audio' && (
+              <>
+                <div style={{ 
+                  background:'rgba(245, 158, 11, 0.08)', 
+                  padding:'14px', 
+                  borderRadius:10,
+                  border:'1px solid rgba(245, 158, 11, 0.2)'
+                }}>
+                  <div style={{ fontWeight:600, fontSize:12, color:'#fbbf24', marginBottom:10 }}>🔊 Audio Visualizers</div>
+                  <button 
+                    onClick={() => {
+                      const avatar = window.__CF_LOCAL_AVATAR__ || {};
+                      const playerX = avatar.x || 0;
+                      const playerZ = avatar.z || 0;
+                      const playerY = (typeof avatar.lift === 'number' && avatar.lift > 0) ? avatar.lift : 5;
+                      const playerYaw = avatar.yaw || 0;
+                      const spawnDistance = 15;
+                      const spawnX = playerX + Math.sin(playerYaw) * spawnDistance;
+                      const spawnZ = playerZ + Math.cos(playerYaw) * spawnDistance;
+                      const spawnY = Math.max(5, playerY);
+                      const newId = Date.now();
+                      const newVisualizer = {
+                        id: newId,
+                        position: [spawnX, spawnY, spawnZ],
+                        refDistance: 10,
+                        maxDistance: 25,
+                        volume: 1.5,
+                        label: `Audio Zone ${audioVisualizers.length + 1}`,
+                        soundFile: 'rocket_ambience.mp3'
+                      };
+                      addVisualizerAndSync(newVisualizer);
+                      setSelectedVisualizer(newId);
                     }}
+                    style={{ 
+                      padding:'12px', 
+                      borderRadius:8, 
+                      border:'1px solid rgba(245, 158, 11, 0.3)', 
+                      background:'rgba(146, 64, 14, 0.5)', 
+                      color:'#ffffff', 
+                      cursor:'pointer',
+                      fontSize: 12,
+                      width: '100%',
+                      fontWeight: 600,
+                      marginBottom:12,
+                      transition:'all 0.2s'
+                    }}
+                    onMouseEnter={e => e.currentTarget.style.background = 'rgba(146, 64, 14, 0.8)'}
+                    onMouseLeave={e => e.currentTarget.style.background = 'rgba(146, 64, 14, 0.5)'}
                   >
-                    <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center' }}>
-                      <span style={{ fontWeight:500 }}>{viz.label}</span>
-                      <button
-                        onClick={(e) => { 
-                          e.stopPropagation(); 
-                          setAudioVisualizers(prev => prev.filter(v => v.id !== viz.id));
-                          if (selectedVisualizer === viz.id) setSelectedVisualizer(null);
-                        }}
-                        style={{ padding:'2px 6px', borderRadius:4, border:'1px solid #dc2626', background:'#7f1d1d', color:'#fecaca', fontSize:10 }}
-                        title="Delete"
-                      >
-                        🗑️
-                      </button>
-                    </div>
-                    <div style={{ marginTop:4, fontSize:10, color:'#94a3b8' }}>
-                      Full: {viz.refDistance}u | Max: {viz.maxDistance}u | Vol: {viz.volume}
+                    + Add Audio Visualizer
+                  </button>
+                  
+                  {/* List of audio visualizers */}
+                  <div>
+                    <div style={{ fontSize:11, color:'#94a3b8', marginBottom:8, fontWeight:600 }}>PLACED ZONES ({audioVisualizers.length})</div>
+                    <div style={{ maxHeight:200, overflowY:'auto', border:'1px solid rgba(148, 163, 184, 0.1)', borderRadius:8, padding:6, background:'rgba(15, 23, 42, 0.3)' }}>
+                      {audioVisualizers.length === 0 ? (
+                        <div style={{ padding:16, color:'#64748b', fontSize:11, textAlign:'center' }}>No visualizers placed</div>
+                      ) : (
+                        audioVisualizers.map((viz, idx) => (
+                          <div 
+                            key={viz.id}
+                            onClick={() => setSelectedVisualizer(viz.id)}
+                            style={{
+                              padding:'10px',
+                              marginBottom:6,
+                              borderRadius:8,
+                              border: selectedVisualizer === viz.id ? '2px solid #f59e0b' : '1px solid rgba(148, 163, 184, 0.15)',
+                              background: selectedVisualizer === viz.id ? 'rgba(120, 53, 15, 0.4)' : 'rgba(15, 23, 42, 0.4)',
+                              cursor:'pointer',
+                              fontSize:11,
+                              transition:'all 0.2s'
+                            }}
+                          >
+                            <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:6 }}>
+                              <span style={{ fontWeight:600, color:'#fbbf24' }}>{viz.label}</span>
+                              <button
+                                onClick={(e) => { 
+                                  e.stopPropagation(); 
+                                  setAudioVisualizers(prev => prev.filter(v => v.id !== viz.id));
+                                  if (selectedVisualizer === viz.id) setSelectedVisualizer(null);
+                                }}
+                                style={{ padding:'4px 8px', borderRadius:6, border:'1px solid rgba(220, 38, 38, 0.3)', background:'rgba(127, 29, 29, 0.6)', color:'#fecaca', fontSize:10 }}
+                                title="Delete"
+                              >
+                                🗑️
+                              </button>
+                            </div>
+                            <div style={{ fontSize:10, color:'#94a3b8' }}>
+                              Full: {viz.refDistance}u • Max: {viz.maxDistance}u • Vol: {viz.volume.toFixed(1)}
+                            </div>
+                          </div>
+                        ))
+                      )}
                     </div>
                   </div>
-                ))
-              )}
-            </div>
-          </div>
+                </div>
+              </>
+            )}
+            
+            {/* SETTINGS TAB */}
+            {activeEditorTab === 'settings' && (
+              <>
+                <div style={{ 
+                  background:'rgba(100, 116, 139, 0.08)', 
+                  padding:'14px', 
+                  borderRadius:10,
+                  border:'1px solid rgba(100, 116, 139, 0.2)'
+                }}>
+                  <div style={{ fontWeight:600, fontSize:12, color:'#cbd5e1', marginBottom:10 }}>⚙️ Camera & Controls</div>
+                  <div style={{ display:'flex', flexDirection:'column', gap:8 }}>
+                    <label style={{ display:'flex', alignItems:'center', gap:10, fontSize:11, cursor:'pointer', padding:'8px', background:'rgba(30, 41, 59, 0.3)', borderRadius:6 }}>
+                      <input type="checkbox" checked={showSelf} onChange={e=>setShowSelf(e.target.checked)} style={{ cursor:'pointer' }} />
+                      <span>Show my character</span>
+                    </label>
+                    <label style={{ display:'flex', alignItems:'center', gap:10, fontSize:11, cursor:'pointer', padding:'8px', background:'rgba(30, 41, 59, 0.3)', borderRadius:6, opacity:!showSelf?0.5:1 }}>
+                      <input type="checkbox" checked={moveEnabled} onChange={e=>setMoveEnabled(e.target.checked)} disabled={!showSelf} style={{ cursor:'pointer' }} />
+                      <span>Movement (arrows)</span>
+                    </label>
+                    <label style={{ display:'flex', alignItems:'center', gap:10, fontSize:11, cursor:'pointer', padding:'8px', background:'rgba(30, 41, 59, 0.3)', borderRadius:6, opacity:(!showSelf || !moveEnabled)?0.5:1 }}>
+                      <input type="checkbox" checked={clickMove} onChange={e=>setClickMove(e.target.checked)} disabled={!showSelf || !moveEnabled} style={{ cursor:'pointer' }} />
+                      <span>Click-to-move</span>
+                    </label>
+                    <label style={{ display:'flex', alignItems:'center', gap:10, fontSize:11, cursor:'pointer', padding:'8px', background:'rgba(30, 41, 59, 0.3)', borderRadius:6 }}>
+                      <input type="checkbox" checked={fullCamera} onChange={e=>setFullCamera(e.target.checked)} style={{ cursor:'pointer' }} />
+                      <span>Full camera controls</span>
+                    </label>
+                    <label style={{ display:'flex', alignItems:'center', gap:10, fontSize:11, cursor:'pointer', padding:'8px', background:'rgba(30, 41, 59, 0.3)', borderRadius:6 }}>
+                      <input type="checkbox" checked={followCam} onChange={e=>setFollowCam(e.target.checked)} style={{ cursor:'pointer' }} />
+                      <span>3rd-person follow</span>
+                    </label>
+                    <label style={{ display:'flex', alignItems:'center', gap:10, fontSize:11, cursor:'pointer', padding:'8px', background:'rgba(30, 41, 59, 0.3)', borderRadius:6 }}>
+                      <input type="checkbox" checked={showCollisionMeshes} onChange={e=>setShowCollisionMeshes(e.target.checked)} style={{ cursor:'pointer' }} />
+                      <span>Show collision boxes</span>
+                    </label>
+                    <button onClick={resetCamera} style={{ 
+                      marginTop:8, 
+                      padding:'10px 14px', 
+                      borderRadius:8, 
+                      border:'1px solid rgba(148, 163, 184, 0.3)', 
+                      background:'rgba(30, 41, 59, 0.6)', 
+                      color:'#e2e8f0', 
+                      cursor:'pointer',
+                      fontSize:11,
+                      fontWeight:600,
+                      transition:'all 0.2s'
+                    }}>
+                      🔄 Reset Camera
+                    </button>
+                  </div>
+                </div>
+                
+                {/* Danger Zone */}
+                <div style={{ 
+                  background:'rgba(220, 38, 38, 0.08)', 
+                  padding:'14px', 
+                  borderRadius:10,
+                  border:'1px solid rgba(220, 38, 38, 0.2)',
+                  marginTop:14
+                }}>
+                  <div style={{ fontWeight:600, fontSize:12, color:'#ef4444', marginBottom:10 }}>⚠️ Danger Zone</div>
+                  <button 
+                    onClick={leaveGame}
+                    style={{ 
+                      padding:'10px 14px', 
+                      borderRadius:8, 
+                      border:'1px solid rgba(220, 38, 38, 0.3)', 
+                      background:'rgba(153, 27, 27, 0.6)', 
+                      color:'#fff', 
+                      cursor:'pointer',
+                      fontSize: 11,
+                      fontWeight: 600,
+                      width: '100%',
+                      transition:'all 0.2s'
+                    }}
+                    onMouseEnter={e => e.currentTarget.style.background = 'rgba(153, 27, 27, 0.9)'}
+                    onMouseLeave={e => e.currentTarget.style.background = 'rgba(153, 27, 27, 0.6)'}
+                  >
+                    Leave Game & Disconnect
+                  </button>
+                </div>
+              </>
+            )}
+          
+          </div> {/* Close inner ltr div */}
+          </div> {/* Close scrollable container */}
         </div>
         )}
         <Canvas
@@ -12660,7 +17307,7 @@ export default function ConnectFour3DView({ board, lastMove, colors, onSelectCol
             <FlybyAsteroids count={15} speed={0.18} dir={[1.0, 0.25]} />
             <StarSwarms maxSwarms={3} basePoints={120} speed={0.55} dir={[1.0, 0.25]} />
             {/* Lunar terrain with hills and mounds - characters walk on the surface */}
-            <LunarTerrain radius={PLAY_AREA_RADIUS} flatRadius={50} />
+            <LunarTerrain radius={TERRAIN_RADIUS} flatRadius={50} showCollisionBox={showCollisionMeshes} />
             {/* Simple staircase you can walk up */}
             <Staircase rocketPositionRef={rocketPositionRef} setFollowRocket={setFollowRocket} showCollisionMeshes={showCollisionMeshes} />
             {/* Extra placed props */}
@@ -12819,7 +17466,7 @@ export default function ConnectFour3DView({ board, lastMove, colors, onSelectCol
             })()}
             {/* Floor click-to-move disabled: only side pads are clickable */}
             <mesh position={[0, groundY + 0.002, 0]} rotation={[-Math.PI/2, 0, 0]} renderOrder={-1} raycast={() => null}>
-              <planeGeometry args={[PLAY_AREA_RADIUS*3, PLAY_AREA_RADIUS*3, 1, 1]} />
+              <planeGeometry args={[TERRAIN_RADIUS*3, TERRAIN_RADIUS*3, 1, 1]} />
               <meshBasicMaterial transparent opacity={0} depthWrite={false} />
             </mesh>
             {/* Board assembly: render only after the table reports top Y (state or global) to avoid initial snap */}
@@ -12906,26 +17553,24 @@ export default function ConnectFour3DView({ board, lastMove, colors, onSelectCol
                     <RemoteAvatarGroup side={remoteSide} base={player1Pos}>
                       {/* Remote P1: show opponent's chosen character (default alien) */}
                       {oppCharacterId === 'astronaut' ? (
-                        <AstronautFBXOpponent key={`opp-p1-astronaut-${window.__CF_HOT_RELOAD_COUNT__ || 0}`} xFront={xFront} xBack={xBack} zSign={player1Pos.zSign} positionOverride={[0, 0, 0]} yawOffset={Math.PI} />
+                        <AstronautFBXOpponent key="opp-p1-astronaut" xFront={xFront} xBack={xBack} zSign={player1Pos.zSign} positionOverride={ZERO_POSITION} yawOffset={Math.PI} />
                       ) : oppCharacterId === 'guy1' ? (
-                        <Guy1FBXOpponent key={`opp-p1-guy1-${window.__CF_HOT_RELOAD_COUNT__ || 0}`} xFront={xFront} xBack={xBack} zSign={player1Pos.zSign} positionOverride={[0, 0, 0]} yawOffset={Math.PI} />
+                        <Guy1FBXOpponent key="opp-p1-guy1" xFront={xFront} xBack={xBack} zSign={player1Pos.zSign} positionOverride={ZERO_POSITION} yawOffset={Math.PI} />
                       ) : oppCharacterId === 'robot4' ? (
-                        <Robot4FBXOpponent key={`opp-p1-robot4-${window.__CF_HOT_RELOAD_COUNT__ || 0}`} xFront={xFront} xBack={xBack} zSign={player1Pos.zSign} positionOverride={[0, 0, 0]} yawOffset={Math.PI} />
+                        <Robot4FBXOpponent key="opp-p1-robot4" xFront={xFront} xBack={xBack} zSign={player1Pos.zSign} positionOverride={ZERO_POSITION} yawOffset={Math.PI} />
                       ) : (
-                        <Alien2FBXOpponent key={`opp-p1-alien-${window.__CF_HOT_RELOAD_COUNT__ || 0}`} xFront={xFront} xBack={xBack} zSign={player1Pos.zSign} positionOverride={[0, 0, 0]} yawOffset={Math.PI} />
+                        <Alien2FBXOpponent key="opp-p1-alien" xFront={xFront} xBack={xBack} zSign={player1Pos.zSign} positionOverride={ZERO_POSITION} yawOffset={Math.PI} />
                       )}
                       <Billboard follow={true} position={[0, oppCharacterId === 'astronaut' || oppCharacterId === 'guy1' || oppCharacterId === 'alien' || oppCharacterId === 'robot4' ? 11 : 7, 0]}>
-                        <group>
                         <Text fontSize={2.2} color={'#cbd5e1'} anchorX="center" anchorY="bottom" outlineWidth={0.04} outlineColor={'#000'} font={'https://fonts.gstatic.com/s/roboto/v30/KFOmCnqEu92Fr1Mu4mxP.ttf'}>
                           {oppName || 'Opponent'}
                         </Text>
-                      </group>
                     </Billboard>
                     </RemoteAvatarGroup>
                   )
                 ) : (
                   showSelf && (
-                    <PlayerMover enabled={moveEnabled} settingsMenuOpen={settingsMenuOpen} setShowEditMenu={setShowEditMenu} setShowChatUI={setShowChatUI} setFullCamera={setFullCamera} setFollowCam={setFollowCam} maxRadius={PLAY_AREA_RADIUS} speed={22} turnSensitivity={liveSettings.turnSensitivity} invertForward={false} baseOffset={[player1Pos.x, player1Pos.z]} initialYaw={0} obstacles={[]} collisionRadius={myCharacterId === 'robot4' ? 4.2 : myCharacterId === 'astronaut' || myCharacterId === 'guy1' ? 3.7 : myCharacterId === 'alien' ? 3.75 : 1.8} collisionForwardOffset={myCharacterId === 'robot4' ? 0 : -1.35} groundSamplePush={(myCharacterId === 'robot4' || myCharacterId === 'astronaut' || myCharacterId === 'guy1' || myCharacterId === 'alien') ? -2.3 : 2.3} backProbeMag={(myCharacterId === 'astronaut' || myCharacterId === 'guy1' || myCharacterId === 'alien') ? -2.3 : undefined} stairMagMul={1.0} labelSide={'Player 1'} labelName={myName} characterId={myCharacterId} showCollisionBoxes={showCollisionMeshes} moveTarget={clickMove ? p1Target : null} onArrive={() => {
+                    <PlayerMover enabled={moveEnabled} settingsMenuOpen={settingsMenuOpen} setShowEditMenu={setShowEditMenu} setShowChatUI={setShowChatUI} setFullCamera={setFullCamera} setFollowCam={setFollowCam} showEditMenu={showEditMenu} activeEditorTab={activeEditorTab} setActiveEditorTab={setActiveEditorTab} selectedSectionIndex={selectedSectionIndex} setSelectedSectionIndex={setSelectedSectionIndex} isInSection={isInSection} setIsInSection={setIsInSection} selectedItemIndex={selectedItemIndex} setSelectedItemIndex={setSelectedItemIndex} isInSubMenu={isInSubMenu} setIsInSubMenu={setIsInSubMenu} selectedSubItemIndex={selectedSubItemIndex} setSelectedSubItemIndex={setSelectedSubItemIndex} cubeEditMode={cubeEditMode} placedCubes={placedCubes} maxRadius={PLAY_AREA_RADIUS} speed={22} turnSensitivity={liveSettings.turnSensitivity} invertForward={false} baseOffset={[player1Pos.x, player1Pos.z]} initialYaw={0} obstacles={[]} collisionRadius={myCharacterId === 'robot4' ? 4.2 : myCharacterId === 'astronaut' || myCharacterId === 'guy1' ? 3.7 : myCharacterId === 'alien' ? 3.75 : 1.8} collisionForwardOffset={myCharacterId === 'robot4' ? 0 : -1.35} groundSamplePush={(myCharacterId === 'robot4' || myCharacterId === 'astronaut' || myCharacterId === 'guy1' || myCharacterId === 'alien') ? -2.3 : 2.3} backProbeMag={(myCharacterId === 'astronaut' || myCharacterId === 'guy1' || myCharacterId === 'alien') ? -2.3 : undefined} stairMagMul={1.0} labelSide={'Player 1'} labelName={myName} characterId={myCharacterId} showCollisionBoxes={showCollisionMeshes} moveTarget={clickMove ? p1Target : null} onArrive={() => {
                       try {
                         // final resend after arrival to guarantee opponent sees yaw=0
                         const msg = window.__CF_LOCAL_AVATAR__;
@@ -12939,7 +17584,10 @@ export default function ConnectFour3DView({ board, lastMove, colors, onSelectCol
                         try { setFollowCam(false); resetCamera(); } catch {}
                       } catch {}
                       setP1Target(null); setFullCamera(false); setShowSelf(false);
-                    }} onPositionChange={(x,z,yaw)=>{ try{ const la = (window.__CF_LOCAL_AVATAR__ || {}); const run = !!la.isRunning; const isJumping = !!la.isJumping; const lift = (typeof la.lift === 'number' ? la.lift : undefined); onAvatarMove && onAvatarMove({ player: 1, x, z, yaw, run, isJumping, lift }); }catch{} }}>
+                    }} onPositionChange={(x,z,yaw)=>{ try{ 
+                      // Don't broadcast position if user is dragging an object
+                      if (window.__CF_IS_DRAGGING_CUBE__) return;
+                      const la = (window.__CF_LOCAL_AVATAR__ || {}); const run = !!la.isRunning; const isJumping = !!la.isJumping; const lift = (typeof la.lift === 'number' ? la.lift : undefined); onAvatarMove && onAvatarMove({ player: 1, x, z, yaw, run, isJumping, lift }); }catch{} }}>
                       {/* Local P1: render selected character */}
                       {myCharacterId === 'astronaut' ? (
                         <AstronautFBXOpponent key={`local-p1-astronaut-${window.__CF_HOT_RELOAD_COUNT__ || 0}`} xFront={xFront} xBack={xBack} zSign={player1Pos.zSign} positionOverride={[0,0,0]} yawOffset={Math.PI} />
@@ -12964,26 +17612,24 @@ export default function ConnectFour3DView({ board, lastMove, colors, onSelectCol
                     <RemoteAvatarGroup side={remoteSide} base={player2Pos}>
                       {/* Remote P2: show opponent's chosen character */}
                       {oppCharacterId === 'astronaut' ? (
-                        <AstronautFBXOpponent key={`opp-p2-astronaut-${window.__CF_HOT_RELOAD_COUNT__ || 0}`} xFront={xFront} xBack={xBack} zSign={player2Pos.zSign} positionOverride={[0, 0, 0]} yawOffset={0} />
+                        <AstronautFBXOpponent key="opp-p2-astronaut" xFront={xFront} xBack={xBack} zSign={player2Pos.zSign} positionOverride={ZERO_POSITION} yawOffset={0} />
                       ) : oppCharacterId === 'guy1' ? (
-                        <Guy1FBXOpponent key={`opp-p2-guy1-${window.__CF_HOT_RELOAD_COUNT__ || 0}`} xFront={xFront} xBack={xBack} zSign={player2Pos.zSign} positionOverride={[0, 0, 0]} yawOffset={0} />
+                        <Guy1FBXOpponent key="opp-p2-guy1" xFront={xFront} xBack={xBack} zSign={player2Pos.zSign} positionOverride={ZERO_POSITION} yawOffset={0} />
                       ) : oppCharacterId === 'robot4' ? (
-                        <Robot4FBXOpponent key={`opp-p2-robot4-${window.__CF_HOT_RELOAD_COUNT__ || 0}`} xFront={xFront} xBack={xBack} zSign={player2Pos.zSign} positionOverride={[0, 0, 0]} yawOffset={0} />
+                        <Robot4FBXOpponent key="opp-p2-robot4" xFront={xFront} xBack={xBack} zSign={player2Pos.zSign} positionOverride={ZERO_POSITION} yawOffset={0} />
                       ) : (
-                        <Alien2FBXOpponent key={`opp-p2-alien-${window.__CF_HOT_RELOAD_COUNT__ || 0}`} xFront={xFront} xBack={xBack} zSign={player2Pos.zSign} positionOverride={[0, 0, 0]} yawOffset={0} />
+                        <Alien2FBXOpponent key="opp-p2-alien" xFront={xFront} xBack={xBack} zSign={player2Pos.zSign} positionOverride={ZERO_POSITION} yawOffset={0} />
                       )}
                       <Billboard follow={true} position={[0, oppCharacterId === 'astronaut' || oppCharacterId === 'guy1' || oppCharacterId === 'alien' || oppCharacterId === 'robot4' ? 11 : 7, 0]}>
-                        <group>
                           <Text fontSize={2.2} color={'#cbd5e1'} anchorX="center" anchorY="bottom" outlineWidth={0.04} outlineColor={'#000'} font={'https://fonts.gstatic.com/s/roboto/v30/KFOmCnqEu92Fr1Mu4mxP.ttf'}>
                             {oppName || 'Opponent'}
                           </Text>
-                        </group>
                       </Billboard>
                     </RemoteAvatarGroup>
                   )
                 ) : (
                   showSelf && (
-                    <PlayerMover enabled={moveEnabled} settingsMenuOpen={settingsMenuOpen} setShowEditMenu={setShowEditMenu} setShowChatUI={setShowChatUI} setFullCamera={setFullCamera} setFollowCam={setFollowCam} maxRadius={PLAY_AREA_RADIUS} speed={22} turnSensitivity={liveSettings.turnSensitivity} invertForward={true} baseOffset={[player2Pos.x, player2Pos.z]} initialYaw={0} clickYawOffset={Math.PI} obstacles={[]} collisionRadius={myCharacterId === 'robot4' ? 4.2 : myCharacterId === 'astronaut' || myCharacterId === 'guy1' ? 3.7 : myCharacterId === 'alien' ? 3.75 : 1.8} collisionForwardOffset={myCharacterId === 'robot4' ? 0 : -1.35} groundSamplePush={(myCharacterId === 'robot4' || myCharacterId === 'astronaut' || myCharacterId === 'guy1' || myCharacterId === 'alien') ? -2.3 : 2.3} backProbeMag={(myCharacterId === 'astronaut' || myCharacterId === 'guy1' || myCharacterId === 'alien') ? -2.3 : undefined} stairMagMul={1.0} labelSide={'Player 2'} labelName={myName} characterId={myCharacterId} showCollisionBoxes={showCollisionMeshes} moveTarget={clickMove ? p2Target : null} onArrive={() => {
+                    <PlayerMover enabled={moveEnabled} settingsMenuOpen={settingsMenuOpen} setShowEditMenu={setShowEditMenu} setShowChatUI={setShowChatUI} setFullCamera={setFullCamera} setFollowCam={setFollowCam} showEditMenu={showEditMenu} activeEditorTab={activeEditorTab} setActiveEditorTab={setActiveEditorTab} selectedSectionIndex={selectedSectionIndex} setSelectedSectionIndex={setSelectedSectionIndex} isInSection={isInSection} setIsInSection={setIsInSection} selectedItemIndex={selectedItemIndex} setSelectedItemIndex={setSelectedItemIndex} isInSubMenu={isInSubMenu} setIsInSubMenu={setIsInSubMenu} selectedSubItemIndex={selectedSubItemIndex} setSelectedSubItemIndex={setSelectedSubItemIndex} cubeEditMode={cubeEditMode} placedCubes={placedCubes} maxRadius={PLAY_AREA_RADIUS} speed={22} turnSensitivity={liveSettings.turnSensitivity} invertForward={true} baseOffset={[player2Pos.x, player2Pos.z]} initialYaw={0} clickYawOffset={Math.PI} obstacles={[]} collisionRadius={myCharacterId === 'robot4' ? 4.2 : myCharacterId === 'astronaut' || myCharacterId === 'guy1' ? 3.7 : myCharacterId === 'alien' ? 3.75 : 1.8} collisionForwardOffset={myCharacterId === 'robot4' ? 0 : -1.35} groundSamplePush={(myCharacterId === 'robot4' || myCharacterId === 'astronaut' || myCharacterId === 'guy1' || myCharacterId === 'alien') ? -2.3 : 2.3} backProbeMag={(myCharacterId === 'astronaut' || myCharacterId === 'guy1' || myCharacterId === 'alien') ? -2.3 : undefined} stairMagMul={1.0} labelSide={'Player 2'} labelName={myName} characterId={myCharacterId} showCollisionBoxes={showCollisionMeshes} moveTarget={clickMove ? p2Target : null} onArrive={() => {
                       try {
                         const msg = window.__CF_LOCAL_AVATAR__;
                         if (msg && Number.isFinite(msg.x) && Number.isFinite(msg.z)) {
@@ -12996,7 +17642,10 @@ export default function ConnectFour3DView({ board, lastMove, colors, onSelectCol
                         try { setFollowCam(false); resetCamera(); } catch {}
                       } catch {}
                       setP2Target(null); setFullCamera(false); setShowSelf(false);
-                    }} onPositionChange={(x,z,yaw)=>{ try{ const la = (window.__CF_LOCAL_AVATAR__ || {}); const run = !!la.isRunning; const isJumping = !!la.isJumping; const lift = (typeof la.lift === 'number' ? la.lift : undefined); onAvatarMove && onAvatarMove({ player: 2, x, z, yaw, run, isJumping, lift }); }catch{} }}>
+                    }} onPositionChange={(x,z,yaw)=>{ try{ 
+                      // Don't broadcast position if user is dragging an object
+                      if (window.__CF_IS_DRAGGING_CUBE__) return;
+                      const la = (window.__CF_LOCAL_AVATAR__ || {}); const run = !!la.isRunning; const isJumping = !!la.isJumping; const lift = (typeof la.lift === 'number' ? la.lift : undefined); onAvatarMove && onAvatarMove({ player: 2, x, z, yaw, run, isJumping, lift }); }catch{} }}>
                       {/* Local P2: render selected character */}
                       {myCharacterId === 'astronaut' ? (
                         <AstronautFBXOpponent key={`local-p2-astronaut-${window.__CF_HOT_RELOAD_COUNT__ || 0}`} xFront={xFront} xBack={xBack} zSign={player2Pos.zSign} positionOverride={[0,0,0]} yawOffset={0} />
@@ -13016,11 +17665,13 @@ export default function ConnectFour3DView({ board, lastMove, colors, onSelectCol
             {/* Labels are now attached and follow avatars (Billboard faces camera) */}
 
             {/* Placed Collision Cubes */}
+            {console.log('[DEBUG] Rendering', placedCubes.length, 'cubes. AI Boxes:', placedCubes.filter(c => c.isAIBox).map(c => ({ id: c.id, label: c.aiBoxLabel, hasContent: !!(c.aiContent || c.aiContentData) })))}
             {placedCubes.map((cube) => (
               <PlacedCube
                 key={cube.id}
                 cube={cube}
                 isSelected={selectedCubeId === cube.id}
+                onSelect={() => setSelectedCubeId(cube.id)}
                 editMode={cubeEditMode}
                 dragMode={cubeDragMode}
                 transformMode={cubeTransformMode}
@@ -13032,6 +17683,15 @@ export default function ConnectFour3DView({ board, lastMove, colors, onSelectCol
                 showCollisionMeshes={showCollisionMeshes}
               />
             ))}
+            
+            {/* Terrain Sculpting Tool */}
+            <TerrainSculptor
+              enabled={sculptMode}
+              brushSize={sculptBrushSize}
+              strength={sculptStrength}
+              placedCubes={placedCubes}
+              onSculpt={handleSculpt}
+            />
             
             {/* Audio Visualizers - with transform controls like cubes */}
             {audioVisualizers.map((viz) => (
@@ -13055,6 +17715,9 @@ export default function ConnectFour3DView({ board, lastMove, colors, onSelectCol
             ))}
 
           </group>
+
+          {/* Cinematic post-processing for stunning space visuals */}
+          <SpaceEffects />
         </Canvas>
       </div>
       
@@ -13066,6 +17729,231 @@ export default function ConnectFour3DView({ board, lastMove, colors, onSelectCol
         onSave={handleSettingsSave}
         onLiveUpdate={handleLiveSettingsUpdate}
       />
+      
+      {/* AI Box Editor Panel */}
+      {aiBoxEditorOpen && (() => {
+        const selectedCube = placedCubes.find(c => c.id === selectedCubeId);
+        if (!selectedCube || !selectedCube.isAIBox) return null;
+        
+        const currentLabel = selectedCube.aiBoxLabel || '';
+        const match = currentLabel.match(/AI Box #(\d+)/);
+        const boxId = match ? match[1] : selectedCube.id;
+        const hasContent = !!(selectedCube.aiContent || selectedCube.aiContentData);
+        
+        return (
+          <div style={{
+            position: 'fixed',
+            top: 'calc(var(--nav-height, 56px) + 20px)',
+            right: '20px',
+            backgroundColor: 'rgba(0, 20, 40, 0.95)',
+            border: '2px solid rgba(0, 255, 255, 0.6)',
+            borderRadius: '12px',
+            padding: '16px',
+            width: '320px',
+            maxHeight: 'calc(100vh - var(--nav-height, 56px) - 40px)',
+            overflowY: 'auto',
+            zIndex: 10002,
+            boxShadow: '0 8px 32px rgba(0, 255, 255, 0.3)',
+            fontFamily: 'monospace',
+            color: '#fff'
+          }}>
+            {/* Header */}
+            <div style={{
+              fontSize: '16px',
+              fontWeight: 'bold',
+              marginBottom: '12px',
+              color: '#00ffff',
+              borderBottom: '1px solid rgba(0, 255, 255, 0.3)',
+              paddingBottom: '8px',
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center'
+            }}>
+              <span>🤖 AI Box</span>
+              <button
+                onClick={() => {
+                  setAIBoxEditorOpen(false);
+                  setSelectedCubeId(null);
+                }}
+                style={{
+                  background: 'rgba(255, 0, 0, 0.2)',
+                  border: '1px solid rgba(255, 0, 0, 0.5)',
+                  color: '#ff6b6b',
+                  padding: '2px 8px',
+                  borderRadius: '4px',
+                  cursor: 'pointer',
+                  fontSize: '12px',
+                  fontFamily: 'monospace'
+                }}
+              >
+                ✕
+              </button>
+            </div>
+            
+            {/* Box ID (read-only) */}
+            <div style={{ marginBottom: '12px' }}>
+              <label style={{
+                display: 'block',
+                fontSize: '12px',
+                color: '#aaa',
+                marginBottom: '4px'
+              }}>
+                AI Box ID
+              </label>
+              <div style={{
+                backgroundColor: 'rgba(0, 0, 0, 0.3)',
+                padding: '6px',
+                borderRadius: '4px',
+                fontSize: '14px',
+                color: '#00ffff',
+                fontWeight: 'bold'
+              }}>
+                #{boxId}
+              </div>
+            </div>
+            
+            {/* Content Status */}
+            <div style={{ marginBottom: '12px' }}>
+              <label style={{
+                display: 'block',
+                fontSize: '12px',
+                color: '#aaa',
+                marginBottom: '4px'
+              }}>
+                Content Status
+              </label>
+              <div style={{
+                backgroundColor: hasContent ? 'rgba(0, 255, 0, 0.1)' : 'rgba(255, 165, 0, 0.1)',
+                border: hasContent ? '1px solid rgba(0, 255, 0, 0.4)' : '1px solid rgba(255, 165, 0, 0.4)',
+                padding: '6px',
+                borderRadius: '4px',
+                fontSize: '12px',
+                color: hasContent ? '#00ff88' : '#ffaa00'
+              }}>
+                {hasContent ? '✓ Generated' : '⚠ Empty'}
+              </div>
+            </div>
+            
+            {/* Custom Title Input */}
+            <div style={{ marginBottom: '12px' }}>
+              <label style={{
+                display: 'block',
+                fontSize: '12px',
+                color: '#aaa',
+                marginBottom: '4px'
+              }}>
+                Title (optional)
+              </label>
+              <input
+                type="text"
+                value={aiBoxEditTitle}
+                onChange={(e) => setAIBoxEditTitle(e.target.value)}
+                placeholder="e.g., Spaceship..."
+                style={{
+                  width: '100%',
+                  padding: '6px',
+                  backgroundColor: 'rgba(0, 0, 0, 0.3)',
+                  border: '1px solid rgba(0, 255, 255, 0.4)',
+                  borderRadius: '4px',
+                  color: '#fff',
+                  fontSize: '13px',
+                  fontFamily: 'monospace',
+                  outline: 'none'
+                }}
+                onFocus={(e) => e.target.style.borderColor = 'rgba(0, 255, 255, 0.8)'}
+                onBlur={(e) => e.target.style.borderColor = 'rgba(0, 255, 255, 0.4)'}
+              />
+              <div style={{
+                fontSize: '10px',
+                color: '#888',
+                marginTop: '4px'
+              }}>
+                AI Box #{boxId}{aiBoxEditTitle.trim() ? ` - ${aiBoxEditTitle.trim()}` : ''}
+              </div>
+            </div>
+            
+            {/* AI Prompt Input */}
+            <div style={{ marginBottom: '12px' }}>
+              <label style={{
+                display: 'block',
+                fontSize: '12px',
+                color: '#aaa',
+                marginBottom: '4px'
+              }}>
+                AI Prompt
+              </label>
+              <textarea
+                value={aiBoxEditPrompt}
+                onChange={(e) => setAIBoxEditPrompt(e.target.value)}
+                placeholder="Describe what to generate..."
+                rows={4}
+                style={{
+                  width: '100%',
+                  padding: '6px',
+                  backgroundColor: 'rgba(0, 0, 0, 0.3)',
+                  border: '1px solid rgba(255, 136, 0, 0.4)',
+                  borderRadius: '4px',
+                  color: '#fff',
+                  fontSize: '12px',
+                  fontFamily: 'monospace',
+                  outline: 'none',
+                  resize: 'vertical'
+                }}
+                onFocus={(e) => e.target.style.borderColor = 'rgba(255, 136, 0, 0.8)'}
+                onBlur={(e) => e.target.style.borderColor = 'rgba(255, 136, 0, 0.4)'}
+              />
+              <div style={{
+                fontSize: '10px',
+                color: '#888',
+                marginTop: '4px'
+              }}>
+                Use /ai{boxId} to generate
+              </div>
+            </div>
+            
+            {/* Save Button */}
+            <button
+              onClick={handleSaveAIBoxTitle}
+              style={{
+                width: '100%',
+                padding: '8px',
+                backgroundColor: 'rgba(0, 255, 136, 0.2)',
+                border: '2px solid rgba(0, 255, 136, 0.6)',
+                borderRadius: '6px',
+                color: '#00ff88',
+                fontSize: '13px',
+                fontWeight: 'bold',
+                cursor: 'pointer',
+                fontFamily: 'monospace',
+                transition: 'all 0.2s'
+              }}
+              onMouseEnter={(e) => {
+                e.target.style.backgroundColor = 'rgba(0, 255, 136, 0.3)';
+                e.target.style.borderColor = 'rgba(0, 255, 136, 0.9)';
+              }}
+              onMouseLeave={(e) => {
+                e.target.style.backgroundColor = 'rgba(0, 255, 136, 0.2)';
+                e.target.style.borderColor = 'rgba(0, 255, 136, 0.6)';
+              }}
+            >
+              💾 Save
+            </button>
+            
+            {/* Note */}
+            <div style={{
+              marginTop: '12px',
+              padding: '8px',
+              backgroundColor: 'rgba(0, 255, 136, 0.1)',
+              border: '1px solid rgba(0, 255, 136, 0.3)',
+              borderRadius: '4px',
+              fontSize: '10px',
+              color: '#00ff88'
+            }}>
+              ℹ️ Server restarts after saving
+            </div>
+          </div>
+        );
+      })()}
       
       {/* Save Notification */}
       {saveNotification && (
@@ -13097,7 +17985,27 @@ export default function ConnectFour3DView({ board, lastMove, colors, onSelectCol
           85% { opacity: 1; transform: translate(-50%, -50%) scale(1); }
           100% { opacity: 0; transform: translate(-50%, -50%) scale(0.8); }
         }
+        @keyframes fadeIn {
+          from { opacity: 0; }
+          to { opacity: 1; }
+        }
+        @keyframes pulse {
+          0%, 100% { transform: scale(1); opacity: 1; }
+          50% { transform: scale(1.1); opacity: 0.8; }
+        }
+        @keyframes spin {
+          from { transform: rotate(0deg); }
+          to { transform: rotate(360deg); }
+        }
+        @keyframes scaleIn {
+          from { transform: scale(0.5); opacity: 0; }
+          to { transform: scale(1); opacity: 1; }
+        }
       `}</style>
     </div>
   );
 }
+
+// Wrap in React.memo to prevent unnecessary re-renders when parent updates
+// This stops opponent avatars from resetting when unrelated UI elements (menus, chat, toggles) are clicked
+export default React.memo(ConnectFour3DView);

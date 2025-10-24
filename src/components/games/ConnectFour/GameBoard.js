@@ -512,6 +512,7 @@ export default function GameBoard({ embedded = false }) {
   const attachHandlers = useCallback((ws) => {
   ws.onopen = () => {
     setWsReady(true);
+    window.__CF_WS_READY__ = true; // Set global flag for 3D view reconnection detection
     setLobbyStatus('idle', { force: true });
     setCurrentPlayer('Looking for another player...');
     try{
@@ -750,14 +751,37 @@ export default function GameBoard({ embedded = false }) {
       // Handle remote cube sync updates
       if (data.type === 'cubes_sync' && Array.isArray(data.cubes)) {
         try {
-          // Set remote cubes to global for 3D view to poll
+          console.log('[GameBoard] 📦 Received cubes_sync from server:', data.cubes.map(c => ({ 
+            id: c.id, 
+            isTerrain: c.isTerrain, 
+            texture: c.texture,
+            shape: c.shape 
+          })));
+          // Set remote cubes to global for 3D view to poll (with timestamp to prevent duplicate applications)
           window.__CF_REMOTE_CUBES__ = data.cubes;
+          window.__CF_REMOTE_CUBES_TIMESTAMP__ = data.timestamp || Date.now();
+          console.log('[GameBoard] ✅ Set window.__CF_REMOTE_CUBES__ with', data.cubes.length, 'cubes (ts:', window.__CF_REMOTE_CUBES_TIMESTAMP__, ')');
           // Also dispatch custom event for immediate update
           window.dispatchEvent(new CustomEvent('cf:cubes_update', { 
             detail: { cubes: data.cubes } 
           }));
+          console.log('[GameBoard] ✅ Dispatched cf:cubes_update event');
         } catch (err) {
-          console.warn('Failed to handle cubes_sync:', err);
+          console.warn('[GameBoard] ❌ Failed to handle cubes_sync:', err);
+        }
+        return;
+      }
+      
+      // Handle server restart countdown
+      if (data.type === 'server-restart-countdown') {
+        try {
+          console.log('[GameBoard] 🔄 Received server restart countdown:', data.countdown);
+          // Dispatch custom event for 3D view to show countdown overlay
+          window.dispatchEvent(new CustomEvent('cf:server-restart-countdown', { 
+            detail: { countdown: data.countdown } 
+          }));
+        } catch (err) {
+          console.warn('[GameBoard] ❌ Failed to handle server restart countdown:', err);
         }
         return;
       }
@@ -773,6 +797,26 @@ export default function GameBoard({ embedded = false }) {
           }));
         } catch (err) {
           console.warn('Failed to handle visualizers_sync:', err);
+        }
+        return;
+      }
+      
+      // Handle live transform updates - dispatch event for immediate state update
+      if (data.type === 'transform_live' && data.cubeId) {
+        try {
+          console.log('[GameBoard] Received live transform for cube', data.cubeId);
+          // Dispatch event with live transform data
+          window.dispatchEvent(new CustomEvent('cf:transform_live', { 
+            detail: { 
+              cubeId: data.cubeId,
+              position: data.position,
+              rotation: data.rotation,
+              scale: data.scale,
+              timestamp: data.timestamp || Date.now()
+            } 
+          }));
+        } catch (err) {
+          console.warn('Failed to handle transform_live:', err);
         }
         return;
       }
@@ -898,6 +942,7 @@ export default function GameBoard({ embedded = false }) {
 
     ws.onclose = () => {
       setWsReady(false);
+      window.__CF_WS_READY__ = false; // Clear global flag for 3D view
       if (gameActiveRef.current || showMatch) {
         setCurrentPlayer('Reconnecting…');
         setTimeout(()=>connectWSRef.current(true),300);
@@ -1048,14 +1093,24 @@ export default function GameBoard({ embedded = false }) {
   const handleAvatarMove = useCallback((msg) => {
     // Handle cube sync messages
     if (msg && msg.type === 'cubes_sync' && Array.isArray(msg.cubes)) {
+      console.log('[GameBoard] 📨 handleAvatarMove received cubes_sync from 3D view:', msg.cubes.map(c => ({ 
+        id: c.id, 
+        isTerrain: c.isTerrain, 
+        texture: c.texture,
+        shape: c.shape 
+      })));
       withOpenSocket((sock) => {
         try {
+          console.log('[GameBoard] 📡 Sending cubes_sync to server via WebSocket...');
           sock.send(JSON.stringify({ 
             type: 'cubes_sync', 
             cubes: msg.cubes, 
             timestamp: msg.timestamp || Date.now() 
           }));
-        } catch {}
+          console.log('[GameBoard] ✅ Sent cubes_sync to server');
+        } catch (err) {
+          console.error('[GameBoard] ❌ Failed to send cubes_sync:', err);
+        }
       });
       return;
     }
@@ -1070,6 +1125,23 @@ export default function GameBoard({ embedded = false }) {
             timestamp: msg.timestamp || Date.now() 
           }));
         } catch {}
+      });
+      return;
+    }
+    
+    // Handle server restart countdown messages
+    if (msg && msg.type === 'server-restart-countdown' && typeof msg.countdown === 'number') {
+      console.log('[GameBoard] 🔄 Broadcasting server restart countdown:', msg.countdown);
+      withOpenSocket((sock) => {
+        try {
+          sock.send(JSON.stringify({ 
+            type: 'server-restart-countdown', 
+            countdown: msg.countdown 
+          }));
+          console.log('[GameBoard] ✅ Sent server-restart-countdown to server');
+        } catch (err) {
+          console.error('[GameBoard] ❌ Failed to send server-restart-countdown:', err);
+        }
       });
       return;
     }
@@ -1134,9 +1206,17 @@ export default function GameBoard({ embedded = false }) {
     cleanSocket(); connectWSRef.current(false);
   };
 
-  const refreshSaved = () => {
+  const refreshSaved = (action, gameId) => {
     const nm = (localStorage.getItem('username') || username || '').toString().slice(0,40);
     if(!nm){ alert('Set a username to fetch your saved games.'); return; }
+    
+    // Handle finish action - delete the saved game
+    if (action === 'finish' && gameId) {
+      removeSaved(gameId);
+      return;
+    }
+    
+    // Default action - refresh the list
     withOpenSocket(sock => { try{ sock.send(JSON.stringify({ type:'listMySavedGames', username: nm, userId: userIdRef.current && userIdRef.current() })); }catch{} });
   };
   const claimSaved = (gameId, otherUsername) => {
@@ -1372,21 +1452,6 @@ export default function GameBoard({ embedded = false }) {
                   );
                   try { return ReactDOM.createPortal(fsNode, document.body); } catch { return null; }
                 })()}
-                {/* Bottom actions below entire board */}
-                <div className="board-actions">
-                  {isGameStarted && (
-                    <>
-                      {winner && (
-                        <button className="btn btn-success btn-resp" onClick={handleRematch}>
-                          <i className="bi bi-arrow-repeat me-1" /> Rematch ({rematchVotes}/2)
-                        </button>
-                      )}
-                      <button className="btn btn-outline-secondary btn-resp" onClick={handleLeave}>
-                        <i className="bi bi-door-open me-1" /> Leave
-                      </button>
-                    </>
-                  )}
-                </div>
               </div>
             )}
 

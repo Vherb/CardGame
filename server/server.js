@@ -182,6 +182,156 @@ app.get('/api/sounds', (req, res) => {
   }
 });
 
+// Model upload configuration - upload to temp folder first
+const modelStorage = multer.diskStorage({
+  destination: function (req, file, cb) {
+    // Upload to temp folder - we'll move files after we have the modelName
+    const tempPath = path.join(__dirname, '..', 'public', 'models', 'props', '_temp_upload');
+    if (!fs.existsSync(tempPath)) {
+      fs.mkdirSync(tempPath, { recursive: true });
+    }
+    cb(null, tempPath);
+  },
+  filename: function (req, file, cb) {
+    // Keep original filename with sanitization
+    const sanitized = file.originalname.replace(/[^a-zA-Z0-9._-]/g, '_');
+    cb(null, Date.now() + '_' + sanitized); // Add timestamp to avoid collisions
+  }
+});
+
+const modelUpload = multer({
+  storage: modelStorage,
+  fileFilter: function (req, file, cb) {
+    // Accept 3D model files and common texture/image formats
+    const allowedExtensions = [
+      '.fbx', '.obj', '.gltf', '.glb', '.dae', '.stl',  // Model files
+      '.jpg', '.jpeg', '.png', '.bmp', '.tga', '.tif', '.tiff',  // Textures
+      '.mtl', '.bin'  // Material/binary files
+    ];
+    const ext = path.extname(file.originalname).toLowerCase();
+    if (allowedExtensions.includes(ext)) {
+      cb(null, true);
+    } else {
+      cb(null, false); // Skip unsupported files instead of erroring
+    }
+  },
+  limits: {
+    fileSize: 100 * 1024 * 1024 // 100MB max file size per file
+  }
+});
+
+// Model upload endpoint - supports multiple files (folder upload)
+app.post('/api/upload-model', modelUpload.array('models', 50), (req, res) => {
+  try {
+    if (!req.files || req.files.length === 0) {
+      return res.status(400).json({ success: false, error: 'No files uploaded' });
+    }
+    
+    const modelName = req.body.modelName || 'unnamed_model';
+    const sanitizedName = modelName.replace(/[^a-zA-Z0-9_-]/g, '_');
+    
+    // Create final destination folder
+    const finalPath = path.join(__dirname, '..', 'public', 'models', 'props', sanitizedName);
+    if (!fs.existsSync(finalPath)) {
+      fs.mkdirSync(finalPath, { recursive: true });
+    }
+    
+    // Move files from temp to final destination
+    const movedFiles = [];
+    for (const file of req.files) {
+      const oldPath = file.path;
+      const cleanFilename = file.originalname.replace(/[^a-zA-Z0-9._-]/g, '_');
+      const newPath = path.join(finalPath, cleanFilename);
+      
+      // Move file
+      fs.renameSync(oldPath, newPath);
+      movedFiles.push({ original: file.originalname, saved: cleanFilename });
+    }
+    
+    // Find the actual model file (not texture)
+    const modelExtensions = ['.fbx', '.obj', '.gltf', '.glb', '.dae', '.stl'];
+    const modelFile = movedFiles.find(f => {
+      const ext = path.extname(f.saved).toLowerCase();
+      return modelExtensions.includes(ext);
+    });
+    
+    if (!modelFile) {
+      return res.status(400).json({ success: false, error: 'No model file found in upload' });
+    }
+    
+    const relativePath = `/models/props/${sanitizedName}/${modelFile.saved}`;
+    
+    console.log(`[Model Upload] Uploaded ${movedFiles.length} files to ${sanitizedName}`);
+    
+    res.json({
+      success: true,
+      filename: modelFile.saved,
+      modelName: sanitizedName,
+      path: relativePath,
+      filesUploaded: movedFiles.length,
+      message: `Model uploaded successfully with ${movedFiles.length} file(s)`
+    });
+  } catch (error) {
+    console.error('Model upload error:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// Get list of custom models
+app.get('/api/models', (req, res) => {
+  try {
+    const modelsPath = path.join(__dirname, '..', 'public', 'models', 'props');
+    if (!fs.existsSync(modelsPath)) {
+      return res.json({ models: [] });
+    }
+    
+    const models = [];
+    const folders = fs.readdirSync(modelsPath, { withFileTypes: true })
+      .filter(dirent => dirent.isDirectory() && dirent.name !== '_temp_upload');
+    
+    // Include ALL folders, even if they don't have model files
+    for (const folder of folders) {
+      const folderPath = path.join(modelsPath, folder.name);
+      
+      // Recursively search for model files in folder and subfolders
+      function findModelFiles(dir, relativePath = '') {
+        const items = fs.readdirSync(dir, { withFileTypes: true });
+        
+        for (const item of items) {
+          const itemPath = path.join(dir, item.name);
+          const itemRelativePath = relativePath ? `${relativePath}/${item.name}` : item.name;
+          
+          if (item.isFile()) {
+            const ext = path.extname(item.name).toLowerCase();
+            if (['.fbx', '.obj', '.gltf', '.glb', '.dae', '.stl'].includes(ext)) {
+              return itemRelativePath;
+            }
+          } else if (item.isDirectory()) {
+            const found = findModelFiles(itemPath, itemRelativePath);
+            if (found) return found;
+          }
+        }
+        return null;
+      }
+      
+      const modelFile = findModelFiles(folderPath);
+      
+      // Add the folder even if no model file found
+      models.push({
+        name: folder.name,
+        file: modelFile || null,
+        path: modelFile ? `/models/props/${folder.name}/${modelFile}` : null
+      });
+    }
+    
+    console.log(`[API] Found ${models.length} folders in props:`, models.map(m => `${m.name}${m.path ? ' ✓' : ' (no model)'}`).join(', '));
+    res.json({ models });
+  } catch (error) {
+    console.error('Error reading models:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
 /* -------------------- Helpers (XLM) -------------------- */
 async function horizonAccount(pub) {
   const r = await fetch(`${HORIZON}/accounts/${encodeURIComponent(pub)}`);
@@ -1314,7 +1464,13 @@ try {
     try { require('../src/components/games/Chess3D/server.js').attachUnified(server, '/ws/raum'); console.log('[unified] mounted /ws/raum'); } catch (e) { console.warn('Raumschach attach failed:', e?.message||e); }
     try { server.on('upgrade', (req)=>{ try{ console.log('[unified] upgrade', req.url); }catch{} }); } catch {}
   const port = Number(process.env.PORT) || Number(process.env.API_PORT) || 3002;
-    server.listen(port, '0.0.0.0', () => console.log(`Unified API+WS on http://0.0.0.0:${port}`));
+    server.listen(port, '0.0.0.0', () => {
+      console.log('\n' + '='.repeat(60));
+      console.log('🔄 SERVER RESTARTED');
+      console.log('='.repeat(60));
+      console.log(`Unified API+WS on http://0.0.0.0:${port}`);
+      console.log('='.repeat(60) + '\n');
+    });
   } else {
   const port = Number(process.env.PORT) || Number(process.env.API_PORT) || 3002;
     app.listen(port, '0.0.0.0', () => console.log(`Server running on http://0.0.0.0:${port}`));

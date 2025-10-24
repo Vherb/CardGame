@@ -65,8 +65,8 @@ html, body, #root { background: var(--bg-body); color: var(--text); -webkit-tap-
 .board-shell { position: fixed; top: var(--nav-h, 56px); left: 0; right: 0; bottom: var(--footer-h, 0px); background: var(--panel-bg); z-index: 1; }
 .board-shell canvas { display: block; width: 100% !important; height: 100% !important; }
 
-/* Full-screen portal shell for C4 3D (leave room for bottom actions ~64px) */
-.c4-fs-shell { position: fixed; top: var(--nav-h, 56px); left: 0; right: 0; height: calc(100dvh - var(--nav-h, 56px) - 64px); background: transparent; z-index: 200; }
+/* Full-screen portal shell for C4 3D - edge to edge at bottom */
+.c4-fs-shell { position: fixed; top: var(--nav-h, 56px); left: 0; right: 0; bottom: 0; background: transparent; z-index: 200; }
 .c4-fs-shell canvas { display:block; width:100% !important; height:100% !important; }
 .board-skin {
   position: relative;

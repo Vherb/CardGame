@@ -1,0 +1,21 @@
+{
+  "watch": [
+    "server/**/*.js",
+    "src/components/games/**/server.js"
+  ],
+  "ignore": [
+    "node_modules/**",
+    "build/**",
+    "public/**",
+    "src/**/*.jsx",
+    "src/**/*.css",
+    "**/*.md",
+    "**/*.json",
+    ".git/**",
+    "logs/**",
+    "render-backend/**"
+  ],
+  "ext": "js",
+  "verbose": false,
+  "delay": 1000
+}

@@ -57,5 +57,15 @@ p {
 
 /* Global button theme now comes from components/common/buttons.css */
 
+/* Hide footer when game is active */
+body.hide-footer footer,
+body.hide-footer .app-footer,
+body.hide-footer .theme-footer {
+  display: none !important;
+  visibility: hidden !important;
+  opacity: 0 !important;
+  pointer-events: none !important;
+}
+
 /* card animations */
 /* (your animations would continue here) */

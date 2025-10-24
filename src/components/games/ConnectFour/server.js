@@ -99,6 +99,11 @@ const send = (ws, payload) => {
 const broadcast = (room, payload) => {
   for (const ws of room.players) send(ws, payload);
 };
+const broadcastExcept = (room, except, payload) => {
+  for (const ws of room.players) {
+    if (ws !== except) send(ws, payload);
+  }
+};
 
 /* ---------- Waiting queue ---------- */
 function addToWaiting(ws){ if (!isOpen(ws)) return false; waiting.add(ws); return true; }
@@ -282,16 +287,31 @@ function disconnect(ws){
 }
 
 /* ---------- Heartbeat + waiting purge ---------- */
+// Check every 2.5 minutes, disconnect after 2 missed pongs (5 minutes total inactivity)
+// This auto-logs out idle users while being lenient with background tabs
+const PING_INTERVAL = 150000; // 2.5 minutes
+const MAX_MISSED_PONGS = 2; // 2 missed = 5 minutes total
+
 setInterval(() => {
   if (!wss) return;
   for (const ws of wss.clients) {
     const st = state.get(ws) || {};
-    if (st.alive === false) { try{ ws.terminate(); }catch{} disconnect(ws); continue; }
-    st.alive = true; state.set(ws, st);
+    const missedPongs = st.missedPongs || 0;
+    
+    if (missedPongs >= MAX_MISSED_PONGS) { 
+      console.log(`[C4 WS] Auto-logout: Connection idle for ${(PING_INTERVAL * MAX_MISSED_PONGS) / 60000} minutes`);
+      try{ ws.terminate(); }catch{} 
+      disconnect(ws); 
+      continue; 
+    }
+    
+    // Increment missed pongs counter (pong handler will reset it to 0)
+    st.missedPongs = missedPongs + 1;
+    state.set(ws, st);
     try{ ws.ping(); }catch{}
   }
   for (const ws of [...waiting]) if (!isOpen(ws)) waiting.delete(ws);
-}, 30000);
+}, PING_INTERVAL);
 
 /* ---------- Persistence ---------- */
 const SAVE_FILE = process.env.CF_SAVE_FILE || path.join(__dirname, 'rooms.save.json');
@@ -310,7 +330,8 @@ function serializeRoom(room){
       tokens: room.tokens,
       paused: !!room.paused,
       lastActivity: room.lastActivity || Date.now(),
-      placedCubes: room.placedCubes || [] // Save placed cubes/spheres
+      placedCubes: room.placedCubes || [], // Save placed cubes/spheres
+      audioVisualizers: room.audioVisualizers || [] // Save audio visualizers
     };
   }catch{ return null; }
 }
@@ -348,6 +369,7 @@ function restoreRooms(){
           paused: !!s.paused,
           lastActivity: Number(s.lastActivity)||Date.now(),
           placedCubes: Array.isArray(s.placedCubes) ? s.placedCubes : [], // Restore placed cubes
+          audioVisualizers: Array.isArray(s.audioVisualizers) ? s.audioVisualizers : [], // Restore audio visualizers
           avatarPositions: {} // Will be populated as players connect
         };
         rooms.set(room.id, room);
@@ -369,8 +391,14 @@ function broadcastPresence(room){
 function attachHandlers(){
   if (!wss) return;
   wss.on('connection', (ws) => {
-  state.set(ws, { alive:true });
-  ws.on('pong', () => { const st = state.get(ws); if (st) st.alive = true; });
+  state.set(ws, { missedPongs: 0 });
+  ws.on('pong', () => { 
+    const st = state.get(ws); 
+    if (st) {
+      st.missedPongs = 0; // Reset counter when pong received
+      state.set(ws, st);
+    }
+  });
 
   ws.on('message', (raw) => {
     let data; try{ data = JSON.parse(raw.toString()); } catch { return; }
@@ -510,7 +538,7 @@ function attachHandlers(){
         break;
       }
       case 'claimSavedGame':{
-        try{ console.log('[c4] recv claimSavedGame', { gameId: Number(data.gameId)||0, other: (data.otherUsername||'')?true:false }); }catch{}
+        // Reduced logging to prevent console spam
         let id = Number(data.gameId)||0; let room = rooms.get(id);
         waiting.delete(ws);
         const uid = Number(data.userId);
@@ -732,7 +760,8 @@ function attachHandlers(){
           // Include jump and current absolute lift height
           payload.isJumping = !!isJumping;
           if (typeof lift === 'number') payload.lift = lift;
-          broadcast(room, payload);
+          // CRITICAL FIX: Don't send position back to the sender - only to opponent!
+          broadcastExcept(room, ws, payload);
         } catch {}
         break;
       }
@@ -809,6 +838,50 @@ function attachHandlers(){
         break;
       }
       
+      case 'server-restart-countdown': {
+        // Broadcast server restart countdown to all players in room
+        try {
+          const st1 = state.get(ws) || {};
+          if (!st1.roomId) break;
+          const room = rooms.get(st1.roomId); if (!room) break;
+          
+          console.log('[c4] 🔄 Broadcasting server restart countdown:', data.countdown);
+          
+          // Broadcast countdown to all players in room
+          broadcast(room, { 
+            type: 'server-restart-countdown', 
+            countdown: data.countdown
+          });
+        } catch (err) {
+          console.error('Error handling server-restart-countdown:', err);
+        }
+        break;
+      }
+      
+      case 'transform_live': {
+        // Live transform updates (same pattern as avatar position - no throttle, no persistence)
+        // Expect payload: { type: 'transform_live', cubeId: string, position, rotation, scale, timestamp }
+        try {
+          const st1 = state.get(ws) || {};
+          if (!st1.roomId || !(st1.playerNumber === 1 || st1.playerNumber === 2)) break;
+          const room = rooms.get(st1.roomId); if (!room) break;
+          
+          // No throttle - send every update like avatar position
+          // Broadcast ONLY to opponent (same as avatar position)
+          broadcastExcept(room, ws, { 
+            type: 'transform_live', 
+            cubeId: data.cubeId,
+            position: data.position,
+            rotation: data.rotation,
+            scale: data.scale,
+            timestamp: data.timestamp || Date.now()
+          });
+        } catch (err) {
+          console.error('Error handling transform_live:', err);
+        }
+        break;
+      }
+      
       case 'sound_uploaded': {
         // Notify other player when someone uploads a new sound file
         // Expect payload: { type: 'sound_uploaded', filename: string, timestamp: number }
@@ -831,6 +904,33 @@ function attachHandlers(){
           });
         } catch (err) {
           console.error('Error handling sound_uploaded:', err);
+        }
+        break;
+      }
+      
+      case 'model_uploaded': {
+        // Notify other player when someone uploads a new model file
+        // Expect payload: { type: 'model_uploaded', model: {name, file, path}, timestamp: number }
+        try {
+          const st1 = state.get(ws) || {};
+          if (!st1.roomId || !(st1.playerNumber === 1 || st1.playerNumber === 2)) break;
+          const room = rooms.get(st1.roomId); if (!room) break;
+          
+          // Validate model object
+          if (!data.model || typeof data.model !== 'object') break;
+          if (!data.model.name || !data.model.path) break;
+          
+          const now = Date.now();
+          room.lastActivity = now;
+          
+          // Broadcast model upload notification to room
+          broadcast(room, { 
+            type: 'model_uploaded', 
+            model: data.model,
+            timestamp: data.timestamp || now
+          });
+        } catch (err) {
+          console.error('Error handling model_uploaded:', err);
         }
         break;
       }
