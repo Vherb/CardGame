@@ -15,10 +15,10 @@ const ROWS = 6;
 const CELL = 1;
 const GAP = 0.1;
 const BOARD_THICK = 0.22;
-// Global play area radius (controls how far avatars can roam - set very large for free exploration)
-const PLAY_AREA_RADIUS = 99999; // Effectively unlimited movement
 // Terrain visual size (separate from movement boundary)
 const TERRAIN_RADIUS = 450; // Size of the lunar surface terrain
+// Global play area radius (controls how far avatars can roam - set very large for free exploration)
+const PLAY_AREA_RADIUS = 99999; // Effectively unlimited movement
 // Simple staircase parameters (world coordinates)
 const STAIR_POS_X = 28;      // center X of the staircase
 const STAIR_POS_Z = 0;       // bottom starts at zMin and goes toward +Z
@@ -67,6 +67,11 @@ function updatePlacedCubesCache(cubes) {
 
 // Shared terrain height calculation (matches the LunarTerrain geometry)
 function getTerrainHeightXZ(x, z, flatRadius = 50, maxRadius = TERRAIN_RADIUS) {
+  // SQUARE boundary check - fall off if outside square terrain
+  if (Math.abs(x) > maxRadius || Math.abs(z) > maxRadius) {
+    return -9999; // Far below - player will fall
+  }
+  
   const distFromCenter = Math.sqrt(x * x + z * z);
   
   // Keep center area flat for Connect Four table
@@ -156,15 +161,18 @@ function getTerrainHeightXZ(x, z, flatRadius = 50, maxRadius = TERRAIN_RADIUS) {
 }
 
 // Get terrain height for a generated terrain cube at position (x, z)
+// EXACTLY like main terrain - no edge blending, multi-point sampling
 function getGeneratedTerrainHeight(x, z, terrainCube) {
-  // Check if position is within the terrain cube bounds
+  // Check if position is within the terrain cube bounds (with small overlap for corners)
   const halfX = terrainCube.scale.x / 2;
   const halfZ = terrainCube.scale.z / 2;
-  const minX = terrainCube.position.x - halfX;
-  const maxX = terrainCube.position.x + halfX;
-  const minZ = terrainCube.position.z - halfZ;
-  const maxZ = terrainCube.position.z + halfZ;
+  const overlap = 0.5; // Small overlap to ensure corners are always covered
+  const minX = terrainCube.position.x - halfX - overlap;
+  const maxX = terrainCube.position.x + halfX + overlap;
+  const minZ = terrainCube.position.z - halfZ - overlap;
+  const maxZ = terrainCube.position.z + halfZ + overlap;
   
+  // Slightly expanded bounds prevent gaps at corners
   if (x < minX || x > maxX || z < minZ || z > maxZ) {
     return null; // Outside this terrain cube
   }
@@ -184,9 +192,8 @@ function getGeneratedTerrainHeight(x, z, terrainCube) {
   const terrainMoundScale = terrainCube.terrainMoundScale || 0.008;
   const terrainMoundMultiplier = terrainCube.terrainMoundMultiplier || 15;
   const terrainOctaves = terrainCube.terrainOctaves || 4;
-  const edgeBlendPercent = terrainCube.terrainEdgeBlend || 0.25;
   
-  // Noise functions (same as TerrainGeometry)
+  // Noise functions (same as main terrain)
   const hash21 = (x, y) => {
     let n = Math.sin(x * 127.1 + y * 311.7) * 43758.5453123;
     return n - Math.floor(n);
@@ -226,22 +233,145 @@ function getGeneratedTerrainHeight(x, z, terrainCube) {
     return value;
   };
   
-  // Calculate normalized distance from edges (same as TerrainGeometry)
-  const normalizedX = Math.abs(localX) / halfX;
-  const normalizedZ = Math.abs(localZ) / halfZ;
-  const normalizedDist = Math.max(normalizedX, normalizedZ);
+  // Generate BASE terrain height (before edge blending)
+  const height = fbm(localX * terrainScale, localZ * terrainScale, terrainOctaves) * terrainHeightMultiplier;
+  const mounds = fbm(localX * terrainMoundScale, localZ * terrainMoundScale, 3) * terrainMoundMultiplier;
   
-  // Calculate blend zone
-  const blendZone = Math.max(0, Math.min(1, (normalizedDist - (1 - edgeBlendPercent)) / edgeBlendPercent));
-  const smoothBlend = blendZone * blendZone * (3 - 2 * blendZone);
-  const heightMultiplierFactor = Math.max(0.1, 1 - smoothBlend);
+  const result = height + mounds;
+  const offset = 0.5; // small offset for nearby sampling
+  const h1 = result;
   
-  // Generate terrain height using LOCAL coordinates (same as TerrainGeometry)
-  const height = fbm(localX * terrainScale, localZ * terrainScale, terrainOctaves) * (terrainHeightMultiplier * heightMultiplierFactor);
-  const mounds = fbm(localX * terrainMoundScale, localZ * terrainMoundScale, 3) * (terrainMoundMultiplier * heightMultiplierFactor);
+  // Multi-point sampling - Sample 4 nearby points and take max to catch peaks
+  const hashOffset = (dx, dz) => {
+    const nx = x + dx;
+    const nz = z + dz;
+    // Check bounds
+    if (nx < minX || nx > maxX || nz < minZ || nz > maxZ) return result;
+    
+    const nLocalX = nx - terrainCube.position.x;
+    const nLocalZ = nz - terrainCube.position.z;
+    const nHeight = fbm(nLocalX * terrainScale, nLocalZ * terrainScale, terrainOctaves) * terrainHeightMultiplier;
+    const nMounds = fbm(nLocalX * terrainMoundScale, nLocalZ * terrainMoundScale, 3) * terrainMoundMultiplier;
+    return nHeight + nMounds;
+  };
+  
+  const h2 = hashOffset(offset, 0);
+  const h3 = hashOffset(-offset, 0);
+  const h4 = hashOffset(0, offset);
+  const h5 = hashOffset(0, -offset);
+  
+  // Take max to avoid going through peaks
+  let finalHeight = Math.max(h1, h2, h3, h4, h5);
+  
+  // EDGE BLENDING - Match visual mesh behavior (critical for corners!)
+  if (terrainCube.snappedEdges && typeof CURRENT_PLACED_CUBES !== 'undefined') {
+    const maxDistX = halfX;
+    const maxDistZ = halfZ;
+    const normalizedX = Math.abs(localX) / maxDistX;
+    const normalizedZ = Math.abs(localZ) / maxDistZ;
+    const blendZone = 0.20; // 20% edge blend zone (MUST match visual mesh)
+    
+    const edgeBlends = [];
+    
+    // Helper to get neighbor's edge height at this position
+    const getNeighborEdgeHeight = (edge) => {
+      const neighborId = terrainCube.snappedEdges[edge];
+      if (!neighborId) return null;
+      
+      const neighbor = CURRENT_PLACED_CUBES.find(c => c.id === neighborId);
+      if (!neighbor || !neighbor.savedEdgeHeights) return null;
+      
+      const edgeMap = { 'north': 'south', 'south': 'north', 'east': 'west', 'west': 'east' };
+      const neighborEdge = edgeMap[edge];
+      const neighborEdgeData = neighbor.savedEdgeHeights[neighborEdge];
+      if (!neighborEdgeData || neighborEdgeData.length === 0) return null;
+      
+      // Transform to neighbor's local space
+      const worldOffsetX = terrainCube.position.x - neighbor.position.x;
+      const worldOffsetZ = terrainCube.position.z - neighbor.position.z;
+      const searchX = localX - worldOffsetX;
+      const searchZ = localZ - worldOffsetZ;
+      
+      // Find closest saved point
+      let closestHeight = null;
+      let minDist = Infinity;
+      for (const saved of neighborEdgeData) {
+        const dist = (edge === 'north' || edge === 'south') 
+          ? Math.abs(saved.localX - searchX)
+          : Math.abs(saved.localZ - searchZ);
+        if (dist < minDist) {
+          minDist = dist;
+          closestHeight = saved.height;
+        }
+      }
+      return closestHeight;
+    };
+    
+    // Check each edge for blending
+    if (terrainCube.snappedEdges.north && localZ > 0 && normalizedZ > (1 - blendZone)) {
+      const blendFactor = (normalizedZ - (1 - blendZone)) / blendZone;
+      const neighborHeight = getNeighborEdgeHeight('north');
+      if (neighborHeight !== null) edgeBlends.push({ blendFactor, neighborHeight });
+    }
+    
+    if (terrainCube.snappedEdges.south && localZ < 0 && normalizedZ > (1 - blendZone)) {
+      const blendFactor = (normalizedZ - (1 - blendZone)) / blendZone;
+      const neighborHeight = getNeighborEdgeHeight('south');
+      if (neighborHeight !== null) edgeBlends.push({ blendFactor, neighborHeight });
+    }
+    
+    if (terrainCube.snappedEdges.east && localX > 0 && normalizedX > (1 - blendZone)) {
+      const blendFactor = (normalizedX - (1 - blendZone)) / blendZone;
+      const neighborHeight = getNeighborEdgeHeight('east');
+      if (neighborHeight !== null) edgeBlends.push({ blendFactor, neighborHeight });
+    }
+    
+    if (terrainCube.snappedEdges.west && localX < 0 && normalizedX > (1 - blendZone)) {
+      const blendFactor = (normalizedX - (1 - blendZone)) / blendZone;
+      const neighborHeight = getNeighborEdgeHeight('west');
+      if (neighborHeight !== null) edgeBlends.push({ blendFactor, neighborHeight });
+    }
+    
+    // Apply blending (at corners, average neighbor heights for smooth transition)
+    if (edgeBlends.length > 0) {
+      let targetHeight, blendFactor;
+      
+      if (edgeBlends.length === 1) {
+        // Single edge: blend to that neighbor
+        targetHeight = edgeBlends[0].neighborHeight;
+        blendFactor = edgeBlends[0].blendFactor;
+      } else {
+        // Corner (multiple edges): average the neighbor heights and use max blend factor
+        // This ensures both edges converge to the same averaged height at the corner
+        const avgHeight = edgeBlends.reduce((sum, e) => sum + e.neighborHeight, 0) / edgeBlends.length;
+        const maxBlend = Math.max(...edgeBlends.map(e => e.blendFactor));
+        targetHeight = avgHeight;
+        blendFactor = maxBlend;
+      }
+      
+      const smoothBlend = blendFactor * blendFactor * (3 - 2 * blendFactor);
+      finalHeight = finalHeight * (1 - smoothBlend) + targetHeight * smoothBlend;
+    }
+  }
+  
+  // Apply sculpting modifications
+  if (terrainCube.heightModifications && terrainCube.heightModifications.length > 0) {
+    for (const mod of terrainCube.heightModifications) {
+      const dx = localX - mod.x;
+      const dz = localZ - mod.z;
+      const distance = Math.sqrt(dx * dx + dz * dz);
+      
+      if (distance < mod.radius) {
+        const falloff = 1 - (distance / mod.radius);
+        const smoothFalloff = falloff * falloff * (3 - 2 * falloff);
+        const heightChange = mod.delta * smoothFalloff;
+        finalHeight += heightChange;
+      }
+    }
+  }
   
   // Return floor top + terrain height
-  return terrainCube.position.y + (terrainCube.scale.y / 2) + height + mounds;
+  return terrainCube.position.y + (terrainCube.scale.y / 2) + finalHeight;
 }
 
 function getGroundHeightXZ(wx, wz) {
@@ -275,15 +405,36 @@ function getGroundHeightXZ(wx, wz) {
   // Only stair2 - stair1 completely removed
   const h2 = sampleStair(STAIR2_POS_X, STAIR2_POS_Z, STAIR2_WIDTH, STAIR2_RUN, STAIR2_RISE, STAIR2_STEPS, STAIR2_PLATFORM_DEPTH, STAIR2_PLATFORM_WIDTH);
   
-  // Always sample terrain height
-  const terrainHeight = getTerrainHeightXZ(wx, wz);
+  // Check if we're within the main terrain bounds (SQUARE boundary)
+  const onMainTerrain = Math.abs(wx) <= TERRAIN_RADIUS && Math.abs(wz) <= TERRAIN_RADIUS;
   
-  // If on stairs, use stair height, otherwise use terrain
-  if (h2 > 0) {
-    return h2;
+  if (onMainTerrain) {
+    // On main terrain - use main terrain height, ignore generated terrain below
+    const terrainHeight = getTerrainHeightXZ(wx, wz);
+    
+    // If on stairs, use stair height, otherwise use terrain
+    if (h2 > 0) {
+      return h2;
+    }
+    
+    return terrainHeight;
+  } else {
+    // OFF main terrain - check for generated terrain cubes to land on
+    if (typeof CURRENT_PLACED_CUBES !== 'undefined' && CURRENT_PLACED_CUBES.length > 0) {
+      for (const cube of CURRENT_PLACED_CUBES) {
+        if (cube.isTerrain && cube.hasTerrainNoise) {
+          const generatedHeight = getGeneratedTerrainHeight(wx, wz, cube);
+          if (generatedHeight !== null) {
+            // Found generated terrain at this position
+            return generatedHeight;
+          }
+        }
+      }
+    }
+    
+    // No terrain found - return very low value so player falls
+    return -9999;
   }
-  
-  return terrainHeight;
 }
 
 function getGroundHeightXZAtY(wx, wz, worldY) {
@@ -549,31 +700,50 @@ function getGroundHeightXZAtY(wx, wz, worldY) {
             }
           }
         }
-        
-        // Check for generated terrain cubes with terrain noise
-        if (cube.isTerrain && cube.hasTerrainNoise) {
-          const generatedTerrainHeight = getGeneratedTerrainHeight(wx, wz, cube);
-          if (generatedTerrainHeight !== null) {
-            const terrainHeightFromGround = generatedTerrainHeight - groundY;
-            // Only use if we're close to or above the terrain surface
-            if (worldY >= generatedTerrainHeight - PLATFORM_UNDERPASS_THRESHOLD) {
-              maxH = Math.max(maxH, terrainHeightFromGround);
-            }
+      }
+    }
+  } catch {}
+  
+  // Check for generated terrain cubes with terrain noise (ALWAYS check, not just walkableTop)
+  let foundGeneratedTerrain = false;
+  let generatedTerrainHeight = null;
+  try {
+    const cubes = CURRENT_PLACED_CUBES || [];
+    
+    // Check ALL terrain cubes and take the MAXIMUM height (handles overlapping corners)
+    for (const cube of cubes) {
+      if (cube.isTerrain && cube.hasTerrainNoise) {
+        const genHeight = getGeneratedTerrainHeight(wx, wz, cube);
+        if (genHeight !== null) {
+          const terrainHeightFromGround = genHeight - groundY;
+          // At corners where multiple terrains overlap, use the HIGHEST terrain
+          if (!foundGeneratedTerrain || terrainHeightFromGround > generatedTerrainHeight) {
+            generatedTerrainHeight = terrainHeightFromGround;
+            foundGeneratedTerrain = true;
           }
         }
       }
     }
   } catch {}
 
-  // Always sample terrain height - if on stairs use stairs, otherwise use terrain
+  // Always sample main terrain height
   const terrainHeight = getTerrainHeightXZ(wx, wz);
   
-  // If on stairs or platform or table, use that height, otherwise use terrain
-  if (maxH > 0) {
-    return maxH;
+  // If off main terrain, use generated terrain if found
+  if (terrainHeight === -9999) {
+    if (foundGeneratedTerrain) {
+      return generatedTerrainHeight;
+    }
+    // No surfaces found - fall
+    return -9999;
   }
   
-  return terrainHeight;
+  // On main terrain - use highest surface
+  if (foundGeneratedTerrain) {
+    return Math.max(maxH, terrainHeight, generatedTerrainHeight);
+  }
+  
+  return Math.max(maxH, terrainHeight);
 }
 
 // Debug toggle for showing collision boxes - moved to component state (showCollisionMeshes)
@@ -2517,6 +2687,96 @@ function TerrainSculptor({ enabled, brushSize, strength, placedCubes, onSculpt }
 }
 
 // Terrain geometry generator with procedural noise
+// Floating labels for terrain identification
+function TerrainLabels({ cube, terrainIndex }) {
+  if (!cube.isTerrain) return null;
+  
+  const labelHeight = 150; // Float WAY above terrain noise
+  const edgeDistance = (cube.scale.x / 2) * 0.8; // 80% of the way to edge
+  
+  return (
+    <group position={[cube.position.x, cube.position.y, cube.position.z]}>
+      {/* Center ID Label */}
+      <Text
+        position={[0, labelHeight, 0]}
+        fontSize={80}
+        color="#00ffff"
+        anchorX="center"
+        anchorY="middle"
+        outlineWidth={3}
+        outlineColor="#000000"
+      >
+        {terrainIndex}
+      </Text>
+      
+      {/* North Label */}
+      <Text
+        position={[0, labelHeight, edgeDistance]}
+        fontSize={50}
+        color="#ff6b6b"
+        anchorX="center"
+        anchorY="middle"
+        outlineWidth={2}
+        outlineColor="#000000"
+      >
+        NORTH
+      </Text>
+      
+      {/* South Label */}
+      <Text
+        position={[0, labelHeight, -edgeDistance]}
+        fontSize={50}
+        color="#4ecdc4"
+        anchorX="center"
+        anchorY="middle"
+        outlineWidth={2}
+        outlineColor="#000000"
+      >
+        SOUTH
+      </Text>
+      
+      {/* East Label */}
+      <Text
+        position={[edgeDistance, labelHeight, 0]}
+        fontSize={50}
+        color="#ffe66d"
+        anchorX="center"
+        anchorY="middle"
+        outlineWidth={2}
+        outlineColor="#000000"
+      >
+        EAST
+      </Text>
+      
+      {/* West Label */}
+      <Text
+        position={[-edgeDistance, labelHeight, 0]}
+        fontSize={50}
+        color="#a8e6cf"
+        anchorX="center"
+        anchorY="middle"
+        outlineWidth={2}
+        outlineColor="#000000"
+      >
+        EAST
+      </Text>
+      
+      {/* West Label */}
+      <Text
+        position={[-edgeDistance, labelHeight, 0]}
+        fontSize={20}
+        color="#a8e6cf"
+        anchorX="center"
+        anchorY="middle"
+        outlineWidth={0.8}
+        outlineColor="#000000"
+      >
+        WEST
+      </Text>
+    </group>
+  );
+}
+
 function TerrainGeometry({ cube }) {
   const geometry = React.useMemo(() => {
     const segments = cube.terrainSegments || 100;
@@ -2574,228 +2834,222 @@ function TerrainGeometry({ cube }) {
     const terrainMoundScale = cube.terrainMoundScale || 0.008;
     const terrainMoundMultiplier = cube.terrainMoundMultiplier || 15;
     const terrainOctaves = cube.terrainOctaves || 4;
-    const edgeBlendPercent = cube.terrainEdgeBlend || 0.25; // Default 25% of edge
     
-    // Calculate max distance from center to edge (for edge blending)
     const maxDistX = sizeX / 2;
     const maxDistZ = sizeZ / 2;
     
-    // Check if this cube has snapped edges
-    // Either this cube is snapped to another (cube.snappedEdge)
-    // OR another cube is snapped to this one (check all cubes)
-    const edgesToSkipBlending = [];
+    // Storage for edge heights - will be saved to cube after generation
+    const edgeHeights = {
+      north: [],
+      south: [],
+      east: [],
+      west: []
+    };
     
-    // Add this cube's snapped edge
-    if (cube.snappedEdge) {
-      edgesToSkipBlending.push(cube.snappedEdge);
-    }
-    
-    // Find the target cube if this cube is snapped to another
-    let targetCube = null;
-    if (cube.snappedTo && typeof CURRENT_PLACED_CUBES !== 'undefined') {
-      targetCube = CURRENT_PLACED_CUBES.find(c => c.id === cube.snappedTo);
-    }
-    
-    // Check if any other cube is snapped to this one
-    if (typeof CURRENT_PLACED_CUBES !== 'undefined') {
-      for (const otherCube of CURRENT_PLACED_CUBES) {
-        if (otherCube.snappedTo === cube.id && otherCube.snappedEdge) {
-          // Figure out which of THIS cube's edges the other cube is snapped to
-          // If other cube's north is snapped, it's touching our south (and vice versa)
-          const edgeMapping = {
-            'north': 'south',
-            'south': 'north',
-            'east': 'west',
-            'west': 'east'
-          };
-          const correspondingEdge = edgeMapping[otherCube.snappedEdge];
-          if (correspondingEdge && !edgesToSkipBlending.includes(correspondingEdge)) {
-            edgesToSkipBlending.push(correspondingEdge);
+    // Helper to get height from neighbor's saved edge
+    // Supports MULTIPLE snapped edges - check snappedEdges object
+    const getSavedEdgeHeight = (edge, localX, localZ) => {
+      // Check if this specific edge has a neighbor
+      if (!cube.snappedEdges || !cube.snappedEdges[edge]) return null;
+      
+      const neighborCubeId = cube.snappedEdges[edge];
+      
+      // Find the neighbor cube
+      let neighborCube = null;
+      if (typeof CURRENT_PLACED_CUBES !== 'undefined') {
+        neighborCube = CURRENT_PLACED_CUBES.find(c => c.id === neighborCubeId);
+      }
+      
+      if (!neighborCube || !neighborCube.savedEdgeHeights) return null;
+      
+      // IMPORTANT: Verify the cubes are actually still close together
+      // If they've been moved apart, don't blend (prevents stale snappedEdges from causing issues)
+      const distX = Math.abs(cube.position.x - neighborCube.position.x);
+      const distZ = Math.abs(cube.position.z - neighborCube.position.z);
+      const maxExpectedDist = (Math.max(cube.scale.x, cube.scale.z) + Math.max(neighborCube.scale.x, neighborCube.scale.z)) / 2 + 5;
+      
+      if (distX > maxExpectedDist || distZ > maxExpectedDist) {
+        // Cubes are too far apart - they're not actually snapped anymore
+        return null;
+      }
+      
+      // ONE-WAY INHERITANCE: This terrain (NEW) adopts the neighbor's (OLD) edge heights
+      // The existing terrain is the authority - we don't need mutual verification
+      // This allows chaining: A → B (adapts to A) → C (adapts to B) → etc.
+      
+      // Determine which edge of the neighbor we're matching
+      const edgeMapping = {
+        'north': 'south',
+        'south': 'north',
+        'east': 'west',
+        'west': 'east'
+      };
+      const neighborEdge = edgeMapping[edge];
+      const neighborEdgeData = neighborCube.savedEdgeHeights[neighborEdge];
+      
+      if (!neighborEdgeData || neighborEdgeData.length === 0) return null;
+      
+      // Transform local coordinates from this cube's space to neighbor's space
+      // This is needed because each terrain has its own local coordinate system
+      // IMPORTANT: Always transform BOTH X and Z coordinates relative to neighbor
+      const worldOffsetX = cube.position.x - neighborCube.position.x;
+      const worldOffsetZ = cube.position.z - neighborCube.position.z;
+      let searchX = localX - worldOffsetX;
+      let searchZ = localZ - worldOffsetZ;
+      
+      // Find closest saved point along the edge
+      let closestHeight = null;
+      let minDist = Infinity;
+      
+      for (const saved of neighborEdgeData) {
+        let dist;
+        if (edge === 'north' || edge === 'south') {
+          // North/south edges vary in X, match by X coordinate
+          dist = Math.abs(saved.localX - searchX);
+        } else {
+          // East/west edges vary in Z, match by Z coordinate
+          dist = Math.abs(saved.localZ - searchZ);
+        }
+        
+        if (dist < minDist) {
+          minDist = dist;
+          closestHeight = saved.height;
+        }
+      }
+      
+      // For corner blending: if we didn't find a close match, try to find ANY edge point
+      // This helps when coordinate transformation is slightly off at corners
+      if (minDist > 1.0 && neighborEdgeData.length > 0) {
+        // Fall back to closest point overall (not just along one axis)
+        for (const saved of neighborEdgeData) {
+          const distX = Math.abs(saved.localX - searchX);
+          const distZ = Math.abs(saved.localZ - searchZ);
+          const totalDist = Math.sqrt(distX * distX + distZ * distZ);
+          
+          if (totalDist < minDist) {
+            minDist = totalDist;
+            closestHeight = saved.height;
           }
         }
       }
-    }
-    
-    // Helper function to get terrain height from target cube's edge at a world position
-    const getTargetEdgeHeight = (worldX, worldZ, targetCube, targetEdge) => {
-      if (!targetCube || !targetCube.hasTerrainNoise) return 0;
       
-      // Transform world position to target cube's local space
-      const dx = worldX - targetCube.position.x;
-      const dz = worldZ - targetCube.position.z;
-      
-      const cosY = Math.cos(-targetCube.rotation.y);
-      const sinY = Math.sin(-targetCube.rotation.y);
-      
-      let localX = dx * cosY - dz * sinY;
-      let localZ = dx * sinY + dz * cosY;
-      
-      // Get target's dimensions
-      const tSizeX = targetCube.scale.x;
-      const tSizeZ = targetCube.scale.z;
-      
-      // Force ONLY the perpendicular coordinate to be at the target's edge
-      if (targetEdge === 'north' || targetEdge === 'south') {
-        localZ = targetEdge === 'north' ? (tSizeZ / 2) : (-tSizeZ / 2);
-      } else {
-        localX = targetEdge === 'east' ? (tSizeX / 2) : (-tSizeX / 2);
-      }
-      
-      // CRITICAL: Use world-space coordinates for noise sampling
-      // This ensures BOTH edges sample the SAME noise pattern at the connection point
-      // Sample using world coordinates directly - this creates the shared terrain
-      const tScale = 0.015; // Use consistent scale for shared edge
-      const tHeightMult = 8;
-      const tMoundScale = 0.008;
-      const tMoundMult = 15;
-      const tOctaves = 4;
-      
-      // Sample noise in WORLD SPACE so both edges get identical values
-      const height = fbm(worldX * tScale, worldZ * tScale, tOctaves) * tHeightMult;
-      const mounds = fbm(worldX * tMoundScale, worldZ * tMoundScale, 3) * tMoundMult;
-      
-      return height + mounds;
+      return closestHeight;
     };
     
     for (let i = 0; i < positions.count; i++) {
       const x = positions.getX(i);
       const z = -positions.getY(i);
       
-      // Transform to world position (apply rotation and position, x/z are already in world-scale from PlaneGeometry)
-      const cosY = Math.cos(cube.rotation.y);
-      const sinY = Math.sin(cube.rotation.y);
-      const worldX = cube.position.x + (x * cosY - z * sinY);
-      const worldZ = cube.position.z + (x * sinY + z * cosY);
+      const normalizedX = Math.abs(x) / maxDistX;
+      const normalizedZ = Math.abs(z) / maxDistZ;
       
-      // Calculate normalized distance from edges in each axis (0 at center, 1 at edge)
-      // This creates an elliptical blend that scales with floor dimensions
-      const normalizedX = Math.abs(x) / maxDistX; // 0 to 1 (center to edge X)
-      const normalizedZ = Math.abs(z) / maxDistZ; // 0 to 1 (center to edge Z)
-      
-      // Determine which edges should blend based on snapped state
-      let shouldBlendX = true;
-      let shouldBlendZ = true;
-      let matchTargetEdge = null;
-      let worldSpaceEdges = []; // Track which specific edges should use world-space noise
-      
-      // Check each edge that should skip blending
-      for (const edge of edgesToSkipBlending) {
-        if (edge === 'north' && z > 0) {
-          shouldBlendZ = false;
-          if (edge === cube.snappedEdge && targetCube) {
-            matchTargetEdge = edge;
-            worldSpaceEdges.push(edge);
-          } else if (edgesToSkipBlending.includes(edge)) {
-            // This edge has another cube snapped to it - use world-space noise
-            worldSpaceEdges.push(edge);
-          }
-        } else if (edge === 'south' && z < 0) {
-          shouldBlendZ = false;
-          if (edge === cube.snappedEdge && targetCube) {
-            matchTargetEdge = edge;
-            worldSpaceEdges.push(edge);
-          } else if (edgesToSkipBlending.includes(edge)) {
-            worldSpaceEdges.push(edge);
-          }
-        } else if (edge === 'east' && x > 0) {
-          shouldBlendX = false;
-          if (edge === cube.snappedEdge && targetCube) {
-            matchTargetEdge = edge;
-            worldSpaceEdges.push(edge);
-          } else if (edgesToSkipBlending.includes(edge)) {
-            worldSpaceEdges.push(edge);
-          }
-        } else if (edge === 'west' && x < 0) {
-          shouldBlendX = false;
-          if (edge === cube.snappedEdge && targetCube) {
-            matchTargetEdge = edge;
-            worldSpaceEdges.push(edge);
-          } else if (edgesToSkipBlending.includes(edge)) {
-            worldSpaceEdges.push(edge);
-          }
-        }
-      }
-      
-      // Calculate blend for each axis independently
-      let blendX = 0, blendZ = 0;
-      
-      if (shouldBlendX) {
-        const blendZoneX = Math.max(0, Math.min(1, (normalizedX - (1 - edgeBlendPercent)) / edgeBlendPercent));
-        blendX = blendZoneX * blendZoneX * (3 - 2 * blendZoneX); // Smoothstep
-      }
-      
-      if (shouldBlendZ) {
-        const blendZoneZ = Math.max(0, Math.min(1, (normalizedZ - (1 - edgeBlendPercent)) / edgeBlendPercent));
-        blendZ = blendZoneZ * blendZoneZ * (3 - 2 * blendZoneZ); // Smoothstep
-      }
-      
-      // Use the maximum blend factor (most edge-like)
-      const smoothBlend = Math.max(blendX, blendZ);
-      
-      // Height multiplier factor: 1 = full multiplier (center), near 0 but not 0 (edge)
-      // Keep some minimum so terrain detail exists at edges (0.1 = 10% of normal height)
-      const heightMultiplierFactor = Math.max(0.1, 1 - smoothBlend);
-      
-      // Generate hills and mounds with reduced multiplier at edges (keeps detail, reduces amplitude)
-      const height = fbm(x * terrainScale, z * terrainScale, terrainOctaves) * (terrainHeightMultiplier * heightMultiplierFactor);
-      const mounds = fbm(x * terrainMoundScale, z * terrainMoundScale, 3) * (terrainMoundMultiplier * heightMultiplierFactor);
+      // Generate base terrain - NO EDGE BLENDING
+      const height = fbm(x * terrainScale, z * terrainScale, terrainOctaves) * terrainHeightMultiplier;
+      const mounds = fbm(x * terrainMoundScale, z * terrainMoundScale, 3) * terrainMoundMultiplier;
       
       let finalHeight = height + mounds;
       
-      // If this vertex is on a snapped edge, use world-space noise for seamless connection
-      if (worldSpaceEdges.length > 0) {
-        // Determine if this vertex is within a snapped edge blend zone
-        let edgeBlendFactor = 0;
-        let onSnappedEdge = false;
-        
-        // Check if on north edge
-        if (worldSpaceEdges.includes('north') && z > 0 && normalizedZ > (1 - edgeBlendPercent)) {
-          const distFromBlendStart = Math.max(0, normalizedZ - (1 - edgeBlendPercent));
-          edgeBlendFactor = distFromBlendStart / edgeBlendPercent;
-          onSnappedEdge = true;
-        }
-        // Check if on south edge
-        else if (worldSpaceEdges.includes('south') && z < 0 && normalizedZ > (1 - edgeBlendPercent)) {
-          const distFromBlendStart = Math.max(0, normalizedZ - (1 - edgeBlendPercent));
-          edgeBlendFactor = distFromBlendStart / edgeBlendPercent;
-          onSnappedEdge = true;
-        }
-        // Check if on east edge
-        else if (worldSpaceEdges.includes('east') && x > 0 && normalizedX > (1 - edgeBlendPercent)) {
-          const distFromBlendStart = Math.max(0, normalizedX - (1 - edgeBlendPercent));
-          edgeBlendFactor = distFromBlendStart / edgeBlendPercent;
-          onSnappedEdge = true;
-        }
-        // Check if on west edge
-        else if (worldSpaceEdges.includes('west') && x < 0 && normalizedX > (1 - edgeBlendPercent)) {
-          const distFromBlendStart = Math.max(0, normalizedX - (1 - edgeBlendPercent));
-          edgeBlendFactor = distFromBlendStart / edgeBlendPercent;
-          onSnappedEdge = true;
-        }
-        
-        // If on a snapped edge, use world-space noise
-        if (onSnappedEdge && edgeBlendFactor > 0) {
-          // Use world-space coordinates for noise sampling - SAME for both terrains!
-          const worldHeight = fbm(worldX * 0.015, worldZ * 0.015, 4) * 8;
-          const worldMounds = fbm(worldX * 0.008, worldZ * 0.008, 3) * 15;
-          const worldTerrainHeight = worldHeight + worldMounds;
-          
-          // Blend from own terrain to world-space terrain at edge
-          const smoothFactor = edgeBlendFactor * edgeBlendFactor * (3 - 2 * edgeBlendFactor);
-          finalHeight = finalHeight * (1 - smoothFactor) + worldTerrainHeight * smoothFactor;
+      // SAVE EDGE HEIGHTS FIRST - before any blending is applied
+      // This ensures we save PURE terrain noise at edges, not blended values
+      // When other terrains read these edges, they get the original heights
+      const edgeTolerance = 0.02; // 2% tolerance for "exactly on edge"
+      if (normalizedZ > (1 - edgeTolerance) && z > 0) {
+        edgeHeights.north.push({ localX: x, localZ: z, height: finalHeight });
+      }
+      if (normalizedZ > (1 - edgeTolerance) && z < 0) {
+        edgeHeights.south.push({ localX: x, localZ: z, height: finalHeight });
+      }
+      if (normalizedX > (1 - edgeTolerance) && x > 0) {
+        edgeHeights.east.push({ localX: x, localZ: z, height: finalHeight });
+      }
+      if (normalizedX > (1 - edgeTolerance) && x < 0) {
+        edgeHeights.west.push({ localX: x, localZ: z, height: finalHeight });
+      }
+      
+      // Edge zone: 20% of terrain width for smooth blending
+      const blendZone = 0.20;
+      
+      // Check ALL edges for snapping - collect blend data
+      const edgeBlends = [];
+      
+      // North edge check (positive Z, far edge)
+      if (cube.snappedEdges && cube.snappedEdges.north && z > 0) {
+        if (normalizedZ > (1 - blendZone)) {
+          const blendFactor = (normalizedZ - (1 - blendZone)) / blendZone;
+          const savedHeight = getSavedEdgeHeight('north', x, z);
+          if (savedHeight !== null) {
+            edgeBlends.push({ edge: 'north', blendFactor, savedHeight });
+          }
         }
       }
       
-      // Apply sculpting modifications
+      // South edge check (negative Z, near edge)
+      if (cube.snappedEdges && cube.snappedEdges.south && z < 0) {
+        if (normalizedZ > (1 - blendZone)) {
+          const blendFactor = (normalizedZ - (1 - blendZone)) / blendZone;
+          const savedHeight = getSavedEdgeHeight('south', x, z);
+          if (savedHeight !== null) {
+            edgeBlends.push({ edge: 'south', blendFactor, savedHeight });
+          }
+        }
+      }
+      
+      // East edge check (positive X, right edge)
+      if (cube.snappedEdges && cube.snappedEdges.east && x > 0) {
+        if (normalizedX > (1 - blendZone)) {
+          const blendFactor = (normalizedX - (1 - blendZone)) / blendZone;
+          const savedHeight = getSavedEdgeHeight('east', x, z);
+          if (savedHeight !== null) {
+            edgeBlends.push({ edge: 'east', blendFactor, savedHeight });
+          }
+        }
+      }
+      
+      // West edge check (negative X, left edge)
+      if (cube.snappedEdges && cube.snappedEdges.west && x < 0) {
+        if (normalizedX > (1 - blendZone)) {
+          const blendFactor = (normalizedX - (1 - blendZone)) / blendZone;
+          const savedHeight = getSavedEdgeHeight('west', x, z);
+          if (savedHeight !== null) {
+            edgeBlends.push({ edge: 'west', blendFactor, savedHeight });
+          }
+        }
+      }
+      
+      // Apply edge blending
+      if (edgeBlends.length > 0) {
+        let targetEdgeHeight;
+        let finalBlendFactor;
+        
+        if (edgeBlends.length === 1) {
+          // Single edge: use that neighbor's height
+          targetEdgeHeight = edgeBlends[0].savedHeight;
+          finalBlendFactor = edgeBlends[0].blendFactor;
+        } else {
+          // Multiple edges (corner): Pick the edge with HIGHEST blend factor (closest to edge)
+          // This avoids averaging - just use the most dominant neighbor
+          const dominantEdge = edgeBlends.reduce((max, curr) => 
+            curr.blendFactor > max.blendFactor ? curr : max
+          );
+          targetEdgeHeight = dominantEdge.savedHeight;
+          finalBlendFactor = dominantEdge.blendFactor;
+        }
+        
+        // Smoothstep for smooth transition from interior terrain to neighbor edge
+        const smoothBlend = finalBlendFactor * finalBlendFactor * (3 - 2 * finalBlendFactor);
+        
+        // Blend from interior terrain (0) to neighbor edge (1)
+        finalHeight = finalHeight * (1 - smoothBlend) + targetEdgeHeight * smoothBlend;
+      }
+      
+      // Apply sculpting modifications (affects all vertices including edges)
       if (cube.heightModifications && cube.heightModifications.length > 0) {
-        // Use local coordinates (x, z are already in local space)
         for (const mod of cube.heightModifications) {
           const dx = x - mod.x;
           const dz = z - mod.z;
           const distance = Math.sqrt(dx * dx + dz * dz);
           
           if (distance < mod.radius) {
-            // Smooth falloff using smoothstep
             const falloff = 1 - (distance / mod.radius);
             const smoothFalloff = falloff * falloff * (3 - 2 * falloff);
             const heightChange = mod.delta * smoothFalloff;
@@ -2804,13 +3058,22 @@ function TerrainGeometry({ cube }) {
         }
       }
       
-      // Apply combined height
+      // Set the height
       positions.setZ(i, finalHeight);
+    }
+    
+    // Save edge heights to cube (will trigger re-render but that's OK)
+    if (typeof CURRENT_PLACED_CUBES !== 'undefined') {
+      const cubeToUpdate = CURRENT_PLACED_CUBES.find(c => c.id === cube.id);
+      if (cubeToUpdate) {
+        cubeToUpdate.savedEdgeHeights = edgeHeights;
+      }
     }
     
     geo.computeVertexNormals();
     return geo;
   }, [
+    cube.id,
     cube.scale.x, 
     cube.scale.z, 
     cube.terrainSegments, 
@@ -2819,18 +3082,15 @@ function TerrainGeometry({ cube }) {
     cube.terrainMoundScale,
     cube.terrainMoundMultiplier,
     cube.terrainOctaves,
-    cube.terrainEdgeBlend,
-    cube.snappedEdge,
-    JSON.stringify(cube.heightModifications || []), // Serialize for proper dependency tracking
-    // Regenerate when any cube's snap state changes (to update edges when others snap to this cube)
-    CURRENT_PLACED_CUBES.map(c => c.snappedTo + c.snappedEdge).join(',')
+    JSON.stringify(cube.snappedEdges || {}), // Support multiple edge snaps
+    JSON.stringify(cube.heightModifications || [])
   ]);
   
   return <primitive object={geometry} attach="geometry" />;
 }
 
 // Edge snapping helper for terrain floors
-// Snaps one edge to align with target edge, but allows sliding along that edge
+// Detects ALL edges that can snap to neighbors - supports multiple simultaneous snaps
 function detectEdgeSnap(movingCube, allCubes, snapDistance = 2.0) {
   if (!movingCube.isTerrain) return null;
   
@@ -2846,25 +3106,54 @@ function detectEdgeSnap(movingCube, allCubes, snapDistance = 2.0) {
   const movingEdges = {
     north: { 
       center: { x: movingCube.position.x + movingHalfZ * sinY, z: movingCube.position.z + movingHalfZ * cosY },
-      perpDir: { x: sinY, z: cosY } // Direction perpendicular to edge (outward normal)
+      perpDir: { x: sinY, z: cosY }, // Direction perpendicular to edge (outward normal)
+      parallelDir: { x: cosY, z: -sinY } // Direction parallel to edge
     },
     south: { 
       center: { x: movingCube.position.x - movingHalfZ * sinY, z: movingCube.position.z - movingHalfZ * cosY },
-      perpDir: { x: -sinY, z: -cosY }
+      perpDir: { x: -sinY, z: -cosY },
+      parallelDir: { x: cosY, z: -sinY }
     },
     east: { 
       center: { x: movingCube.position.x + movingHalfX * cosY, z: movingCube.position.z - movingHalfX * sinY },
-      perpDir: { x: cosY, z: -sinY }
+      perpDir: { x: cosY, z: -sinY },
+      parallelDir: { x: sinY, z: cosY }
     },
     west: { 
       center: { x: movingCube.position.x - movingHalfX * cosY, z: movingCube.position.z + movingHalfX * sinY },
-      perpDir: { x: -cosY, z: sinY }
+      perpDir: { x: -cosY, z: sinY },
+      parallelDir: { x: sinY, z: cosY }
     }
   };
+  
+  // Collect ALL snap connections (up to 4 edges can snap simultaneously)
+  const snapConnections = {};
+  let totalSnapOffsetX = 0;
+  let totalSnapOffsetY = 0;
+  let totalSnapOffsetZ = 0;
+  let snapCount = 0;
+  
+  // Maximum center-to-center distance to even consider snapping (prevent far away terrains from snapping)
+  // Use half the sum of both cubes' dimensions plus a small buffer
+  const movingMaxDim = Math.max(movingCube.scale.x, movingCube.scale.z);
   
   // Check against all other terrain cubes
   for (const targetCube of allCubes) {
     if (!targetCube.isTerrain || targetCube.id === movingCube.id) continue;
+    
+    const targetMaxDim = Math.max(targetCube.scale.x, targetCube.scale.z);
+    
+    // Pre-filter: Skip if cubes are too far apart (center-to-center)
+    // They should only snap if within reach of their combined edge distances + snap threshold
+    const maxReasonableDistance = (movingMaxDim / 2) + (targetMaxDim / 2) + snapThreshold + 5;
+    const centerDist = Math.sqrt(
+      Math.pow(targetCube.position.x - movingCube.position.x, 2) +
+      Math.pow(targetCube.position.z - movingCube.position.z, 2)
+    );
+    
+    if (centerDist > maxReasonableDistance) {
+      continue; // Too far away, skip this target
+    }
     
     const targetHalfX = targetCube.scale.x / 2;
     const targetHalfZ = targetCube.scale.z / 2;
@@ -2874,19 +3163,23 @@ function detectEdgeSnap(movingCube, allCubes, snapDistance = 2.0) {
     const targetEdges = {
       north: { 
         center: { x: targetCube.position.x + targetHalfZ * targetSinY, z: targetCube.position.z + targetHalfZ * targetCosY },
-        perpDir: { x: targetSinY, z: targetCosY }
+        perpDir: { x: targetSinY, z: targetCosY },
+        parallelDir: { x: targetCosY, z: -targetSinY }
       },
       south: { 
         center: { x: targetCube.position.x - targetHalfZ * targetSinY, z: targetCube.position.z - targetHalfZ * targetCosY },
-        perpDir: { x: -targetSinY, z: -targetCosY }
+        perpDir: { x: -targetSinY, z: -targetCosY },
+        parallelDir: { x: targetCosY, z: -targetSinY }
       },
       east: { 
         center: { x: targetCube.position.x + targetHalfX * targetCosY, z: targetCube.position.z - targetHalfX * targetSinY },
-        perpDir: { x: targetCosY, z: -targetSinY }
+        perpDir: { x: targetCosY, z: -targetSinY },
+        parallelDir: { x: targetSinY, z: targetCosY }
       },
       west: { 
         center: { x: targetCube.position.x - targetHalfX * targetCosY, z: targetCube.position.z + targetHalfX * targetSinY },
-        perpDir: { x: -targetCosY, z: targetSinY }
+        perpDir: { x: -targetCosY, z: targetSinY },
+        parallelDir: { x: targetSinY, z: targetCosY }
       }
     };
     
@@ -2909,22 +3202,80 @@ function detectEdgeSnap(movingCube, allCubes, snapDistance = 2.0) {
       const perpDistance = Math.abs(dx * targetEdge.perpDir.x + dz * targetEdge.perpDir.z);
       
       if (perpDistance < snapThreshold) {
-        // Snap: move only in the perpendicular direction to align edges
-        // Calculate how much to move perpendicular to make edges flush
-        const snapOffset = perpDistance * (dx * targetEdge.perpDir.x + dz * targetEdge.perpDir.z > 0 ? -1 : 1);
-        
-        return {
-          targetCubeId: targetCube.id,
-          movingEdge: movingEdgeName,
-          targetEdge: targetEdgeName,
-          snapOffset: {
-            x: snapOffset * targetEdge.perpDir.x,
-            z: snapOffset * targetEdge.perpDir.z
-          },
-          perpDistance
-        };
+        // Only store if this is closer than any existing connection for this edge
+        if (!snapConnections[movingEdgeName] || perpDistance < snapConnections[movingEdgeName].perpDistance) {
+          // Calculate parallel offset (how far off-center the edges are along the edge direction)
+          const parallelOffset = dx * targetEdge.parallelDir.x + dz * targetEdge.parallelDir.z;
+          
+          // Calculate snap offsets to align edges flush (no gap, no overlap)
+          const signedPerpDist = dx * targetEdge.perpDir.x + dz * targetEdge.perpDir.z;
+          
+          // ONLY align perpendicular (make flush) - don't adjust parallel offset
+          // Parallel offset correction can cause issues at corners
+          const snapOffsetX = -signedPerpDist * targetEdge.perpDir.x;
+          const snapOffsetZ = -signedPerpDist * targetEdge.perpDir.z;
+          
+          // Calculate Y position to align BOTTOM of terrains (base alignment)
+          // Edge blending will handle the height matching at the edges
+          // Don't use collision box top - that causes slight lift when blending adjusts heights
+          const movingBottom = movingCube.position.y - (movingCube.scale.y / 2);
+          const targetBottom = targetCube.position.y - (targetCube.scale.y / 2);
+          const yOffset = targetBottom - movingBottom;
+          
+          // Store this snap connection (overwrite if this is closer)
+          snapConnections[movingEdgeName] = {
+            targetCubeId: targetCube.id,
+            targetEdge: targetEdgeName,
+            snapOffset: { x: snapOffsetX, y: yOffset, z: snapOffsetZ },
+            perpDistance
+          };
+        }
       }
     }
+  }
+  
+  // If we found any snaps, calculate the combined offset
+  snapCount = Object.keys(snapConnections).length;
+  
+  if (snapCount > 0) {
+    let combinedSnapOffset;
+    
+    if (snapCount === 1) {
+      // Single edge - use the offset directly from the initial detection
+      const connection = Object.values(snapConnections)[0];
+      combinedSnapOffset = { ...connection.snapOffset };
+    } else {
+      // Multiple edges (corner snap)
+      // At corners, we need BOTH edge corrections applied independently
+      // Don't sum - use each edge's full correction for its respective axis
+      const connections = Object.entries(snapConnections);
+      let xOffset = 0, zOffset = 0, ySum = 0;
+      
+      for (const [edgeName, conn] of connections) {
+        ySum += conn.snapOffset.y;
+        
+        // North/South edges correct Z position
+        if (edgeName === 'north' || edgeName === 'south') {
+          zOffset = conn.snapOffset.z;
+        }
+        // East/West edges correct X position  
+        else if (edgeName === 'east' || edgeName === 'west') {
+          xOffset = conn.snapOffset.x;
+        }
+      }
+      
+      combinedSnapOffset = {
+        x: xOffset,
+        y: ySum / snapCount,
+        z: zOffset
+      };
+    }
+    
+    return {
+      snapConnections, // Object: { edgeName: { targetCubeId, targetEdge, snapOffset, perpDistance } }
+      averageSnapOffset: combinedSnapOffset, // Use this for position adjustment
+      snapCount
+    };
   }
   
   return null;
@@ -3032,7 +3383,7 @@ function AIContentSyncedWithMesh({ meshRef, contentData, cubePosition, cubeRotat
   );
 }
 
-function PlacedCube({ cube, isSelected, onSelect, editMode, dragMode, transformMode, snap, translateSnap, rotateSnapDeg, scaleSnap, onTransformEnd, showCollisionMeshes, orbitControlsRef }) {
+function PlacedCube({ cube, isSelected, onSelect, editMode, dragMode, transformMode, snap, translateSnap, rotateSnapDeg, scaleSnap, onTransformEnd, showCollisionMeshes, orbitControlsRef, snapConfirmDialog, setSnapConfirmDialog, pendingSnapCubeId, setPendingSnapCubeId, placedCubes }) {
   const meshRef = React.useRef();
   const transformRef = React.useRef();
   const [isSnapped, setIsSnapped] = React.useState(false);
@@ -3079,6 +3430,14 @@ function PlacedCube({ cube, isSelected, onSelect, editMode, dragMode, transformM
       
       const handleDraggingChanged = (event) => {
         isDragging.current = event.value;
+        
+        // When starting to drag a terrain, clear its snappedEdges
+        // because it's no longer in the snapped position
+        if (event.value && cube.isTerrain && cube.snappedEdges && Object.keys(cube.snappedEdges).length > 0) {
+          if (onTransformEnd) {
+            onTransformEnd({ snappedEdges: {} });
+          }
+        }
       };
       
       const handleMouseUp = () => {
@@ -3090,19 +3449,86 @@ function PlacedCube({ cube, isSelected, onSelect, editMode, dragMode, transformM
         targetRot.current.copy(rotation);
         targetScale.current.copy(scale);
         
+        // Check for snap at the FINAL position (mouseUp), not during drag
+        if (cube.isTerrain) {
+          const mainFloorTerrain = {
+            id: 'main-floor',
+            isTerrain: true,
+            position: { x: 0, y: 0, z: 0 },
+            rotation: { x: 0, y: 0, z: 0 },
+            scale: { x: 100, y: 1, z: 100 },
+            hasTerrainNoise: true
+          };
+          
+          const snapInfo = detectEdgeSnap(
+            {
+              ...cube,
+              position: { x: position.x, y: position.y, z: position.z },
+              rotation: { x: rotation.x, y: rotation.y, z: rotation.z },
+              scale: { x: scale.x, y: scale.y, z: scale.z }
+            },
+            [...CURRENT_PLACED_CUBES, mainFloorTerrain],
+            2.0
+          );
+          
+          if (snapInfo) {
+            // Build detailed message showing terrain IDs and edges
+            const connections = Object.entries(snapInfo.snapConnections).map(([edgeName, conn]) => {
+              const terrainCubes = placedCubes.filter(c => c.isTerrain);
+              const terrainIndex = terrainCubes.findIndex(c => c.id === conn.targetCubeId) + 1;
+              return `Terrain #${terrainIndex} (${edgeName} edge)`;
+            }).join(', ');
+            
+            // Show confirmation dialog with CURRENT position (at mouseUp)
+            setSnapConfirmDialog({
+              cubeId: cube.id,
+              snapInfo: snapInfo,
+              position: { x: position.x, y: position.y, z: position.z }, // Use current position, not pre-snap
+              message: `Edge snapping detected!\nSnapping to ${connections}\nDo you want to snap?`
+            });
+            setPendingSnapCubeId(cube.id);
+            return; // Don't send transform update yet
+          }
+        }
+        
+        // Check if snap was detected during drag (old path, shouldn't happen now)
+        if (meshRef.current.userData.pendingSnapInfo) {
+          const snapInfo = meshRef.current.userData.pendingSnapInfo;
+          
+          // Build detailed message showing terrain IDs and edges
+          const connections = Object.entries(snapInfo.snapConnections).map(([edgeName, conn]) => {
+            const terrainCubes = placedCubes.filter(c => c.isTerrain);
+            const terrainIndex = terrainCubes.findIndex(c => c.id === conn.targetCubeId) + 1;
+            return `Terrain #${terrainIndex} (${edgeName} edge)`;
+          }).join(', ');
+          
+          // Show confirmation dialog
+          setSnapConfirmDialog({
+            cubeId: cube.id,
+            snapInfo: snapInfo,
+            position: { ...meshRef.current.userData.preSnapPosition },
+            message: `Edge snapping detected!\nSnapping to ${connections}\nDo you want to snap?`
+          });
+          setPendingSnapCubeId(cube.id);
+          return; // Don't send transform update yet
+        }
+        
         const updates = {
           position: { x: position.x, y: position.y, z: position.z },
           rotation: { x: rotation.x, y: rotation.y, z: rotation.z },
           scale: { x: scale.x, y: scale.y, z: scale.z }
         };
         
-        // Include snap information if present
-        if (meshRef.current.userData.snapInfo) {
-          updates.snappedTo = meshRef.current.userData.snapInfo.targetCubeId;
-          updates.snappedEdge = meshRef.current.userData.snapInfo.movingEdge;
+        // Include snap information if present (supports multiple edges)
+        if (meshRef.current.userData.snapInfo && meshRef.current.userData.snapInfo.snapConnections) {
+          // Convert snapConnections to snappedEdges format: { edgeName: neighborCubeId }
+          const snappedEdges = {};
+          for (const [edgeName, connection] of Object.entries(meshRef.current.userData.snapInfo.snapConnections)) {
+            snappedEdges[edgeName] = connection.targetCubeId;
+          }
+          updates.snappedEdges = snappedEdges;
         } else {
-          updates.snappedTo = null;
-          updates.snappedEdge = null;
+          updates.snappedEdges = {};
         }
         
         // Send final snapped position to opponent
@@ -3116,7 +3542,7 @@ function PlacedCube({ cube, isSelected, onSelect, editMode, dragMode, transformM
         controls.removeEventListener('mouseUp', handleMouseUp);
       };
     }
-  }, [onTransformEnd]);
+  }, [onTransformEnd, cube.isTerrain, cube.snappedEdges, placedCubes]);
   
   // LIVE TRANSFORM BROADCAST for primitives (box/sphere/cylinder)
   // Also applies edge snapping for terrain floors
@@ -3132,6 +3558,9 @@ function PlacedCube({ cube, isSelected, onSelect, editMode, dragMode, transformM
     
     // Apply edge snapping for terrain floors during translate mode
     if (cube.isTerrain && transformMode === 'translate') {
+      // Skip snap detection if this cube is already pending confirmation
+      if (pendingSnapCubeId === cube.id) return;
+      
       // Create virtual main floor terrain for snapping
       const mainFloorTerrain = {
         id: 'main-floor',
@@ -3154,27 +3583,32 @@ function PlacedCube({ cube, isSelected, onSelect, editMode, dragMode, transformM
       );
       
       if (snapInfo) {
-        // Apply snap offset - only moves perpendicular to edge, allows sliding along edge
-        position.x += snapInfo.snapOffset.x;
-        position.z += snapInfo.snapOffset.z;
-        
-        // Store snap info for terrain edge matching
-        meshRef.current.userData.snapInfo = snapInfo;
+        // Store snap info but DON'T apply yet - show confirmation dialog
+        meshRef.current.userData.pendingSnapInfo = snapInfo;
+        meshRef.current.userData.preSnapPosition = { x: position.x, y: position.y, z: position.z };
         setIsSnapped(true);
       } else {
-        delete meshRef.current.userData.snapInfo;
+        delete meshRef.current.userData.pendingSnapInfo;
+        delete meshRef.current.userData.preSnapPosition;
         setIsSnapped(false);
       }
     }
     
     if (onTransformEnd) {
+      // Convert snapConnections to snappedEdges for broadcast
+      const snappedEdges = {};
+      if (meshRef.current.userData.snapInfo && meshRef.current.userData.snapInfo.snapConnections) {
+        for (const [edgeName, connection] of Object.entries(meshRef.current.userData.snapInfo.snapConnections)) {
+          snappedEdges[edgeName] = connection.targetCubeId;
+        }
+      }
+      
       onTransformEnd({
         position: { x: position.x, y: position.y, z: position.z },
         rotation: { x: rotation.x, y: rotation.y, z: rotation.z },
         scale: { x: scale.x, y: scale.y, z: scale.z },
         isLive: true,
-        snappedTo: meshRef.current.userData.snapInfo?.targetCubeId,
-        snappedEdge: meshRef.current.userData.snapInfo?.movingEdge
+        snappedEdges: snappedEdges
       });
     }
   });
@@ -3390,15 +3824,15 @@ function PlacedCube({ cube, isSelected, onSelect, editMode, dragMode, transformM
             )}
             <meshStandardMaterial 
               key={`material-${cube.id}-${texture ? 'textured' : 'notextured'}-${cube.hasTerrainNoise ? 'terrain' : 'flat'}-${isSnapped ? 'snapped' : 'unsnapped'}-${cube.isAIBox ? 'aibox' : 'normal'}`}
-              color={isSelected && !cube.isTerrain ? '#10b981' : (cube.isTerrain ? (cube.hasTerrainNoise ? '#22c55e' : (texture ? '#ffffff' : '#22c55e')) : cube.color)}
+              color={isSelected && !cube.isTerrain ? '#10b981' : (isSnapped && cube.isTerrain ? '#0ea5e9' : (cube.isTerrain ? (cube.hasTerrainNoise ? '#22c55e' : (texture ? '#ffffff' : '#22c55e')) : cube.color))}
               metalness={0.3}
               roughness={0.7}
               transparent={cube.isTerrain ? true : true}
               opacity={cube.isAIBox ? 0.15 : (cube.isTerrain ? (cube.hasTerrainNoise ? 0.6 : (texture ? 1 : 0.6)) : (editMode ? (texture ? 1 : 0.7) : (texture ? 1 : 0.5)))}
               wireframe={cube.isAIBox || !cube.hasCollision}
               map={cube.isTerrain && cube.hasTerrainNoise ? undefined : (texture || undefined)}
-              emissive={isSnapped ? '#00ff00' : (cube.isAIBox ? '#22d3ee' : '#000000')}
-              emissiveIntensity={isSnapped ? 0.3 : (cube.isAIBox ? 0.5 : 0)}
+              emissive={isSnapped && cube.isTerrain ? '#0ea5e9' : (cube.isAIBox ? '#22d3ee' : '#000000')}
+              emissiveIntensity={isSnapped && cube.isTerrain ? 0.5 : (cube.isAIBox ? 0.5 : 0)}
             />
           </mesh>
           
@@ -10554,18 +10988,24 @@ function PlayerMover({ enabled = false, maxRadius = PLAY_AREA_RADIUS, speed = 16
           }
         }
       }
-      // Clamp based on world position = parent + baseOffset
-          const wx = nx + (baseOffset?.[0] || 0);
-          const wz = nz + (baseOffset?.[1] || 0);
-      const r = Math.hypot(wx, wz);
-      if (r <= maxRadius) {
+      // Clamp based on world position = parent + baseOffset (SQUARE boundary)
+      const wx = nx + (baseOffset?.[0] || 0);
+      const wz = nz + (baseOffset?.[1] || 0);
+      
+      // Square boundary check instead of circular
+      const maxX = maxRadius;
+      const maxZ = maxRadius;
+      
+      if (Math.abs(wx) <= maxX && Math.abs(wz) <= maxZ) {
+        // Inside square boundary - allow movement
         ref.current.position.x = nx;
         ref.current.position.z = nz;
       } else {
-        // project onto boundary, then subtract baseOffset to get parent pos
-        const ang = Math.atan2(wz, wx);
-        ref.current.position.x = Math.cos(ang) * maxRadius - (baseOffset?.[0] || 0);
-        ref.current.position.z = Math.sin(ang) * maxRadius - (baseOffset?.[1] || 0);
+        // Outside square boundary - clamp to edges
+        const clampedWx = Math.max(-maxX, Math.min(maxX, wx));
+        const clampedWz = Math.max(-maxZ, Math.min(maxZ, wz));
+        ref.current.position.x = clampedWx - (baseOffset?.[0] || 0);
+        ref.current.position.z = clampedWz - (baseOffset?.[1] || 0);
       }
       
       // Clamp to platform edges and rocket base (like world edge - simple position clamping)
@@ -12623,6 +13063,10 @@ function ConnectFour3DView({ board, lastMove, colors, onSelectColumn, flip180 = 
   const [cubeRotateSnapDeg, setCubeRotateSnapDeg] = useState(15);
   const [cubeScaleSnap, setCubeScaleSnap] = useState(0.1);
   
+  // Edge snap confirmation state
+  const [snapConfirmDialog, setSnapConfirmDialog] = useState(null); // { cubeId, snapInfo, position }
+  const [pendingSnapCubeId, setPendingSnapCubeId] = useState(null); // Track which cube is awaiting snap confirmation
+  
   // AI Box editor state
   const [aiBoxEditorOpen, setAIBoxEditorOpen] = useState(false);
   const [aiBoxEditTitle, setAIBoxEditTitle] = useState('');
@@ -13493,6 +13937,48 @@ function ConnectFour3DView({ board, lastMove, colors, onSelectColumn, flip180 = 
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [sculptMode, undoSculpt]);
   
+  // Arrow key controls for moving selected terrain
+  useEffect(() => {
+    if (!cubeEditMode || !selectedCubeId) return;
+    
+    const handleKeyDown = (e) => {
+      const selectedCube = placedCubes.find(c => c.id === selectedCubeId);
+      if (!selectedCube) return;
+      
+      // Check if arrow keys are pressed
+      if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.key)) {
+        e.preventDefault();
+        
+        // Movement step size (can be modified based on snap settings)
+        const moveStep = cubeSnap ? cubeTranslateSnap : 1.0;
+        
+        // Calculate new position based on arrow key
+        let newPosition = { ...selectedCube.position };
+        
+        switch (e.key) {
+          case 'ArrowUp':
+            newPosition.z -= moveStep; // Move forward (negative Z)
+            break;
+          case 'ArrowDown':
+            newPosition.z += moveStep; // Move backward (positive Z)
+            break;
+          case 'ArrowLeft':
+            newPosition.x -= moveStep; // Move left (negative X)
+            break;
+          case 'ArrowRight':
+            newPosition.x += moveStep; // Move right (positive X)
+            break;
+        }
+        
+        // Update the cube position
+        updateCubeAndSync(selectedCubeId, { position: newPosition });
+      }
+    };
+    
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [cubeEditMode, selectedCubeId, placedCubes, cubeSnap, cubeTranslateSnap, updateCubeAndSync]);
+  
   // ===== AUDIO VISUALIZER SYNC FUNCTIONS =====
   const sendVisualizerUpdate = useCallback((visualizers) => {
     if (onAvatarMove) {
@@ -13628,9 +14114,9 @@ function ConnectFour3DView({ board, lastMove, colors, onSelectColumn, flip180 = 
       ...cube,
       id: Date.now() + Math.random(),
       position: positionOffset,
-      // Clear snap data for duplicated terrain (it should not be pre-snapped)
-      snappedTo: null,
-      snappedEdge: null,
+      // Clear ALL snap-related data for duplicated terrain (it should not be pre-snapped)
+      snappedEdges: {}, // Support multiple edge snaps
+      savedEdgeHeights: undefined, // Clear old edge height data (prevents ghost blending)
       // Deep copy all terrain-specific properties
       scale: cube.scale ? { ...cube.scale } : undefined,
       rotation: cube.rotation ? { ...cube.rotation } : undefined,
@@ -14250,10 +14736,10 @@ function ConnectFour3DView({ board, lastMove, colors, onSelectColumn, flip180 = 
   }, [youArePlayer2, player1Pos.x, player1Pos.z, player2Pos.x, player2Pos.z, fullCamera]);
 
   // Cinematic post-processing effects for space environment
+  /*
   const SpaceEffects = React.memo(function SpaceEffects() {
     return (
       <EffectComposer>
-        {/* Bloom: Makes stars, lights, and glowing objects radiate beautifully */}
         <Bloom
           intensity={1.2}
           luminanceThreshold={0.2}
@@ -14262,13 +14748,11 @@ function ConnectFour3DView({ board, lastMove, colors, onSelectColumn, flip180 = 
           radius={0.9}
         />
         
-        {/* Chromatic Aberration: Subtle lens distortion for cinematic space feel */}
         <ChromaticAberration
           blendFunction={BlendFunction.NORMAL}
           offset={[0.0015, 0.0015]}
         />
         
-        {/* Vignette: Darkens edges for cinematic focus */}
         <Vignette
           offset={0.3}
           darkness={0.6}
@@ -14278,6 +14762,7 @@ function ConnectFour3DView({ board, lastMove, colors, onSelectColumn, flip180 = 
       </EffectComposer>
     );
   });
+  */
 
   // Canvas-aware controls wrapper to avoid constructing OrbitControls before camera exists
   // Memoized to prevent unnecessary re-renders that could reset camera position
@@ -14334,6 +14819,10 @@ function ConnectFour3DView({ board, lastMove, colors, onSelectColumn, flip180 = 
       const originalUpdate = ctrl.update.bind(ctrl);
       
       ctrl.target.set = function(...args) {
+        // During sculpting, only allow user-initiated orbit changes, block automatic target changes
+        if (sculptMode && !window.__CF_USER_ORBIT__) {
+          return this;
+        }
         // Allow changes during user interaction, when explicitly allowed, or when editing an object/visualizer
         if (window.__CF_USER_ORBIT__ || window.__CF_ALLOW_TARGET_CHANGE__ || selectedCubeId || selectedVisualizer) {
           const result = originalSet(...args);
@@ -14345,6 +14834,10 @@ function ConnectFour3DView({ board, lastMove, colors, onSelectColumn, flip180 = 
       };
       
       ctrl.target.copy = function(v) {
+        // During sculpting, only allow user-initiated orbit changes, block automatic target changes
+        if (sculptMode && !window.__CF_USER_ORBIT__) {
+          return this;
+        }
         // Allow changes during user interaction, when explicitly allowed, or when editing an object/visualizer
         if (window.__CF_USER_ORBIT__ || window.__CF_ALLOW_TARGET_CHANGE__ || selectedCubeId || selectedVisualizer) {
           const result = originalCopy(v);
@@ -14357,18 +14850,18 @@ function ConnectFour3DView({ board, lastMove, colors, onSelectColumn, flip180 = 
       
       // Intercept update to save/restore camera state
       ctrl.update = function(...args) {
-        if (window.__CF_USER_ORBIT__) {
+        if (window.__CF_USER_ORBIT__ || sculptMode) {
           const result = originalUpdate(...args);
-          saveState();
+          if (window.__CF_USER_ORBIT__) saveState();
           return result;
         }
-        // Allow internal updates but restore camera orientation ONLY if user has moved camera
+        // Allow internal updates but restore camera orientation ONLY if user has moved camera and NOT in sculpt mode
         const result = originalUpdate(...args);
-        if (hasUserMovedCamera && savedTarget && savedQuaternion && savedPosition) {
+        if (!sculptMode && hasUserMovedCamera && savedTarget && savedQuaternion && savedPosition) {
           // Restore camera angle if it changed
           camera.quaternion.copy(savedQuaternion);
           camera.position.copy(savedPosition);
-          ctrl.target.copy(savedTarget);
+          originalCopy.call(ctrl.target, savedTarget); // Use original method to bypass our intercept
         }
         return result;
       };
@@ -14379,7 +14872,7 @@ function ConnectFour3DView({ board, lastMove, colors, onSelectColumn, flip180 = 
         ctrl.target.copy = originalCopy;
         ctrl.update = originalUpdate;
       };
-    }, [fullCamera, camera, selectedCubeId, selectedVisualizer]);
+    }, [fullCamera, camera, sculptMode, selectedCubeId, selectedVisualizer]);
     
     if (!camera) return null;
     
@@ -14678,11 +15171,7 @@ function ConnectFour3DView({ board, lastMove, colors, onSelectColumn, flip180 = 
         const desiredCameraPos = new THREE.Vector3(msg.x, lookAtY + heightAdjustment, msg.z)
           .addScaledVector(forward, -CAMERA_DISTANCE * Math.cos(verticalAngle.current));
         
-        // Prevent camera from going below the floor (add small offset of 2 units above ground)
-        const floorY = baseY + 2;
-        if (desiredCameraPos.y < floorY) {
-          desiredCameraPos.y = floorY;
-        }
+        // NO floor clamp - allow camera to follow player down when falling off edges
         
         // Smooth lerp to desired position (instant update if settings just changed or first frame)
         let alpha = Math.min(1, dt * 3.0);
@@ -15291,7 +15780,7 @@ function ConnectFour3DView({ board, lastMove, colors, onSelectColumn, flip180 = 
                 transition: 'all 0.2s ease'
               }}
             >
-              <input type="checkbox" checked={sculptMode} onChange={e=>setSculptMode(e.target.checked)} style={{ cursor:'pointer' }} /> 
+              <input type="checkbox" checked={sculptMode} onChange={e=>{ setSculptMode(e.target.checked); if(e.target.checked) setSelectedCubeId(null); }} style={{ cursor:'pointer' }} /> 
               <span style={{ fontWeight:500 }}>🎨 Terrain Sculpting</span>
             </label>
             
@@ -15303,7 +15792,7 @@ function ConnectFour3DView({ board, lastMove, colors, onSelectColumn, flip180 = 
                   <input 
                     type="range" 
                     min="1" 
-                    max="20" 
+                    max="200" 
                     step="0.5" 
                     value={sculptBrushSize} 
                     onChange={e=>setSculptBrushSize(parseFloat(e.target.value))}
@@ -17671,7 +18160,7 @@ function ConnectFour3DView({ board, lastMove, colors, onSelectColumn, flip180 = 
                 key={cube.id}
                 cube={cube}
                 isSelected={selectedCubeId === cube.id}
-                onSelect={() => setSelectedCubeId(cube.id)}
+                onSelect={() => !sculptMode && setSelectedCubeId(cube.id)}
                 editMode={cubeEditMode}
                 dragMode={cubeDragMode}
                 transformMode={cubeTransformMode}
@@ -17681,7 +18170,17 @@ function ConnectFour3DView({ board, lastMove, colors, onSelectColumn, flip180 = 
                 scaleSnap={cubeScaleSnap}
                 onTransformEnd={(updates) => updateCubeAndSync(cube.id, updates)}
                 showCollisionMeshes={showCollisionMeshes}
+                snapConfirmDialog={snapConfirmDialog}
+                setSnapConfirmDialog={setSnapConfirmDialog}
+                pendingSnapCubeId={pendingSnapCubeId}
+                setPendingSnapCubeId={setPendingSnapCubeId}
+                placedCubes={placedCubes}
               />
+            ))}
+            
+            {/* Terrain Labels - ID and Edge Names */}
+            {placedCubes.filter(c => c.isTerrain).map((cube, index) => (
+              <TerrainLabels key={`label-${cube.id}`} cube={cube} terrainIndex={index + 1} />
             ))}
             
             {/* Terrain Sculpting Tool */}
@@ -17717,7 +18216,7 @@ function ConnectFour3DView({ board, lastMove, colors, onSelectColumn, flip180 = 
           </group>
 
           {/* Cinematic post-processing for stunning space visuals */}
-          <SpaceEffects />
+          {/* <SpaceEffects /> */}
         </Canvas>
       </div>
       
@@ -17729,6 +18228,134 @@ function ConnectFour3DView({ board, lastMove, colors, onSelectColumn, flip180 = 
         onSave={handleSettingsSave}
         onLiveUpdate={handleLiveSettingsUpdate}
       />
+      
+      {/* Edge Snap Confirmation Dialog */}
+      {snapConfirmDialog && (
+        <div style={{
+          position: 'fixed',
+          top: '50%',
+          left: '50%',
+          transform: 'translate(-50%, -50%)',
+          backgroundColor: 'rgba(15, 23, 42, 0.98)',
+          border: '2px solid #0ea5e9',
+          borderRadius: '16px',
+          padding: '24px',
+          zIndex: 10003,
+          boxShadow: '0 20px 60px rgba(14, 165, 233, 0.4)',
+          minWidth: '320px',
+          maxWidth: '400px'
+        }}>
+          <div style={{
+            fontSize: '18px',
+            fontWeight: 'bold',
+            color: '#0ea5e9',
+            marginBottom: '16px',
+            textAlign: 'center'
+          }}>
+            🔗 Edge Snapping Detected
+          </div>
+          
+          <div style={{
+            fontSize: '14px',
+            color: '#cbd5e1',
+            marginBottom: '20px',
+            lineHeight: '1.6',
+            whiteSpace: 'pre-line',
+            textAlign: 'center'
+          }}>
+            {snapConfirmDialog.message}
+          </div>
+          
+          <div style={{ display: 'flex', gap: '12px', justifyContent: 'center' }}>
+            <button
+              onClick={() => {
+                // Apply the snap
+                const cube = placedCubes.find(c => c.id === snapConfirmDialog.cubeId);
+                if (cube) {
+                  const snapInfo = snapConfirmDialog.snapInfo;
+                  const newPosition = {
+                    x: snapConfirmDialog.position.x + snapInfo.averageSnapOffset.x,
+                    y: snapConfirmDialog.position.y + snapInfo.averageSnapOffset.y,
+                    z: snapConfirmDialog.position.z + snapInfo.averageSnapOffset.z
+                  };
+                  
+                  // Convert snapConnections to snappedEdges
+                  const snappedEdges = {};
+                  for (const [edgeName, connection] of Object.entries(snapInfo.snapConnections)) {
+                    snappedEdges[edgeName] = connection.targetCubeId;
+                  }
+                  
+                  // Update the snapping cube with new position AND clear old saved heights
+                  // This forces geometry regeneration with new snap data
+                  updateCubeAndSync(snapConfirmDialog.cubeId, {
+                    position: newPosition,
+                    snappedEdges: snappedEdges,
+                    savedEdgeHeights: undefined // Clear old edge data, will regenerate with new snaps
+                  });
+                  
+                  // Force re-render of neighbor terrains to ensure their edge heights are saved
+                  // This ensures the snapped terrain can read the neighbor's edge data
+                  for (const [edgeName, connection] of Object.entries(snapInfo.snapConnections)) {
+                    const neighborCube = placedCubes.find(c => c.id === connection.targetCubeId);
+                    if (neighborCube && neighborCube.isTerrain) {
+                      // Trigger a tiny update to force geometry regeneration
+                      updateCubeAndSync(connection.targetCubeId, {
+                        terrainScale: neighborCube.terrainScale || 0.1
+                      });
+                    }
+                  }
+                }
+                
+                setSnapConfirmDialog(null);
+                setPendingSnapCubeId(null);
+              }}
+              style={{
+                padding: '12px 24px',
+                backgroundColor: '#0ea5e9',
+                color: '#fff',
+                border: 'none',
+                borderRadius: '8px',
+                fontSize: '14px',
+                fontWeight: 'bold',
+                cursor: 'pointer',
+                transition: 'all 0.2s'
+              }}
+              onMouseEnter={(e) => e.target.style.backgroundColor = '#0284c7'}
+              onMouseLeave={(e) => e.target.style.backgroundColor = '#0ea5e9'}
+            >
+              ✓ Yes, Snap
+            </button>
+            
+            <button
+              onClick={() => {
+                setSnapConfirmDialog(null);
+                setPendingSnapCubeId(null);
+              }}
+              style={{
+                padding: '12px 24px',
+                backgroundColor: 'rgba(148, 163, 184, 0.2)',
+                color: '#cbd5e1',
+                border: '1px solid rgba(148, 163, 184, 0.3)',
+                borderRadius: '8px',
+                fontSize: '14px',
+                fontWeight: 'bold',
+                cursor: 'pointer',
+                transition: 'all 0.2s'
+              }}
+              onMouseEnter={(e) => {
+                e.target.style.backgroundColor = 'rgba(148, 163, 184, 0.3)';
+                e.target.style.color = '#fff';
+              }}
+              onMouseLeave={(e) => {
+                e.target.style.backgroundColor = 'rgba(148, 163, 184, 0.2)';
+                e.target.style.color = '#cbd5e1';
+              }}
+            >
+              ✗ No, Cancel
+            </button>
+          </div>
+        </div>
+      )}
       
       {/* AI Box Editor Panel */}
       {aiBoxEditorOpen && (() => {
@@ -18009,3 +18636,4 @@ function ConnectFour3DView({ board, lastMove, colors, onSelectColumn, flip180 = 
 // Wrap in React.memo to prevent unnecessary re-renders when parent updates
 // This stops opponent avatars from resetting when unrelated UI elements (menus, chat, toggles) are clicked
 export default React.memo(ConnectFour3DView);
+
